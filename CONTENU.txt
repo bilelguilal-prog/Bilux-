@@ -1,0 +1,6 @@
+BILUX — NUCLEAR ASCENSION V4 / SwiftUI natif
+------------------------------------------------
+Ouvrir sur Mac : BiluxIOS.xcodeproj
+Lire : README.md (installation, import V3, connexion MyFitnessPal)
+Tests : Tests/V3ImportCheck.swift (import V3)
+Attention : ce ZIP est du code SOURCE, pas une .ipa signée ni une app installable depuis Safari.

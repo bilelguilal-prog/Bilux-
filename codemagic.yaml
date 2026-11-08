@@ -1,0 +1,50 @@
+# BILUX — Nuclear Ascension | Construction iOS sur Mac distant
+# Avant la distribution TestFlight, configurer Apple Developer, HealthKit,
+# le bundle ID et l'integration App Store Connect dans Codemagic.
+workflows:
+  verification-sans-signature:
+    name: BILUX - Verifier le projet iOS (sans Apple Developer)
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      xcode: latest
+    scripts:
+      - name: Compiler pour simulateur (sans signature)
+        script: |
+          set -o pipefail
+          xcodebuild -project BiluxIOS.xcodeproj \
+            -scheme BiluxIOS \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO build \
+            2>&1 | tee /tmp/bilux-build.log
+    artifacts:
+      - /tmp/bilux-build.log
+
+  distribution-testflight:
+    name: BILUX - Publier sur TestFlight (compte Apple payant requis)
+    instance_type: mac_mini_m2
+    max_build_duration: 90
+    integrations:
+      app_store_connect: bilux_apple # REMPLACER par le nom de votre integration Codemagic
+    environment:
+      xcode: latest
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.bilux.nuclearascension # Adapter si besoin, egalement dans le .xcodeproj
+    scripts:
+      - name: Appliquer les profils Apple
+        script: xcode-project use-profiles
+      - name: Construire la version TestFlight
+        script: |
+          xcode-project build-ipa \
+            --project "$CM_BUILD_DIR/BiluxIOS.xcodeproj" \
+            --scheme BiluxIOS
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
+        submit_to_app_store: false

@@ -1,0 +1,91 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		C82D65E2A5383830CEDB3885 /* BiluxApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6755EEB7AF41FAFBE00CB5A4 /* BiluxApp.swift */; };
+		592ED5C41CC267BC4B7A088E /* BiluxScreens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4C306D254DE8B0636B16E55E /* BiluxScreens.swift */; };
+		1966D369D8BCDA3C90D0701A /* BiluxStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22B6737FD84BD395911EACFC /* BiluxStore.swift */; };
+		3BA71DB977261263BA4D6032 /* EntryForms.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1AD4538DFEF909964664AB68 /* EntryForms.swift */; };
+		E9737FBDE3B287774314A6C4 /* HealthKitManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEA1F8A41B53DB77A1976409 /* HealthKitManager.swift */; };
+		A00D5755FDA39BE871E05563 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F4E73145E79E79129E2144A /* Models.swift */; };
+		07BAD10632E7FB84639F1390 /* V3Import.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5F3BB468EA1FEC126CE6808 /* V3Import.swift */; };
+		C1778F18E9682FB2E9FDB3F7 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 87F0E30A28F0BC1808C661EE /* Assets.xcassets */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		6755EEB7AF41FAFBE00CB5A4 /* BiluxApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BiluxApp.swift"; sourceTree = "<group>"; };
+		4C306D254DE8B0636B16E55E /* BiluxScreens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BiluxScreens.swift"; sourceTree = "<group>"; };
+		22B6737FD84BD395911EACFC /* BiluxStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BiluxStore.swift"; sourceTree = "<group>"; };
+		1AD4538DFEF909964664AB68 /* EntryForms.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "EntryForms.swift"; sourceTree = "<group>"; };
+		DEA1F8A41B53DB77A1976409 /* HealthKitManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "HealthKitManager.swift"; sourceTree = "<group>"; };
+		1F4E73145E79E79129E2144A /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Models.swift"; sourceTree = "<group>"; };
+		E5F3BB468EA1FEC126CE6808 /* V3Import.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "V3Import.swift"; sourceTree = "<group>"; };
+		87F0E30A28F0BC1808C661EE /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		605982921DAA8CD491D368D3 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		058F490602B2B62C771FFB0F /* BiluxIOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = BiluxIOS.entitlements; sourceTree = "<group>"; };
+		CC340BB9FA1DB34CACC6DA03 /* BiluxIOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BiluxIOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		E3F06FD7C13F014006BB4448 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		304FDC8BEF893C116B6F96EE = {isa = PBXGroup; children = (097BD6E55910A674447D81C6 /* BiluxIOS */, 811A418E8A3EB06D20C111F0 /* Products */); sourceTree = "<group>"; };
+		097BD6E55910A674447D81C6 /* BiluxIOS */ = {isa = PBXGroup; children = (
+				6755EEB7AF41FAFBE00CB5A4 /* BiluxApp.swift */,
+				4C306D254DE8B0636B16E55E /* BiluxScreens.swift */,
+				22B6737FD84BD395911EACFC /* BiluxStore.swift */,
+				1AD4538DFEF909964664AB68 /* EntryForms.swift */,
+				DEA1F8A41B53DB77A1976409 /* HealthKitManager.swift */,
+				1F4E73145E79E79129E2144A /* Models.swift */,
+				E5F3BB468EA1FEC126CE6808 /* V3Import.swift */,
+				87F0E30A28F0BC1808C661EE /* Assets.xcassets */,
+				605982921DAA8CD491D368D3 /* Info.plist */,
+				058F490602B2B62C771FFB0F /* BiluxIOS.entitlements */,
+			); path = BiluxIOS; sourceTree = "<group>"; };
+		811A418E8A3EB06D20C111F0 /* Products */ = {isa = PBXGroup; children = (CC340BB9FA1DB34CACC6DA03 /* BiluxIOS.app */); name = Products; sourceTree = "<group>"; };
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		1952ACBA95857616D2C65FE6 /* BiluxIOS */ = {isa = PBXNativeTarget; buildConfigurationList = F6282F1F8302DEED6C065DE0 /* Build configuration list for PBXNativeTarget "BiluxIOS" */; buildPhases = (A2982903B87765C1546D4580 /* Sources */, E3F06FD7C13F014006BB4448 /* Frameworks */, 6993F04E30712B11E97F63E4 /* Resources */); buildRules = (); dependencies = (); name = BiluxIOS; productName = BiluxIOS; productReference = CC340BB9FA1DB34CACC6DA03 /* BiluxIOS.app */; productType = "com.apple.product-type.application"; };
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		439A1489934641902C60A204 /* Project object */ = {isa = PBXProject; attributes = {BuildIndependentTargetsInParallel = 1; LastUpgradeCheck = 1600; TargetAttributes = {1952ACBA95857616D2C65FE6 = {CreatedOnToolsVersion = 16.0; }; }; }; buildConfigurationList = 8AC64F79374AFE2C8C5B6B15; compatibilityVersion = "Xcode 14.0"; developmentRegion = fr; hasScannedForEncodings = 0; knownRegions = (fr, en, Base); mainGroup = 304FDC8BEF893C116B6F96EE; productRefGroup = 811A418E8A3EB06D20C111F0; projectDirPath = ""; projectRoot = ""; targets = (1952ACBA95857616D2C65FE6); };
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		6993F04E30712B11E97F63E4 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (C1778F18E9682FB2E9FDB3F7 /* Assets.xcassets in Resources */); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A2982903B87765C1546D4580 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (
+				C82D65E2A5383830CEDB3885 /* BiluxApp.swift in Sources */,
+				592ED5C41CC267BC4B7A088E /* BiluxScreens.swift in Sources */,
+				1966D369D8BCDA3C90D0701A /* BiluxStore.swift in Sources */,
+				3BA71DB977261263BA4D6032 /* EntryForms.swift in Sources */,
+				E9737FBDE3B287774314A6C4 /* HealthKitManager.swift in Sources */,
+				A00D5755FDA39BE871E05563 /* Models.swift in Sources */,
+				07BAD10632E7FB84639F1390 /* V3Import.swift in Sources */,
+			); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		0E49001574942847AE5AF465 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {CLANG_ENABLE_MODULES = YES; CLANG_ENABLE_OBJC_ARC = YES; GCC_C_LANGUAGE_STANDARD = gnu17; SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = 1; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; DEBUG_INFORMATION_FORMAT = dwarf; }; name = Debug; };
+		54667FDE2D0A0F296B2C6646 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {CLANG_ENABLE_MODULES = YES; CLANG_ENABLE_OBJC_ARC = YES; GCC_C_LANGUAGE_STANDARD = gnu17; SDKROOT = iphoneos; IPHONEOS_DEPLOYMENT_TARGET = 17.0; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = 1; SWIFT_OPTIMIZATION_LEVEL = "-O"; DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym"; }; name = Release; };
+		4CCE5B0B8FA7019988A972E7 /* Debug */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_ENTITLEMENTS = BiluxIOS/BiluxIOS.entitlements; CODE_SIGN_STYLE = Automatic; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = BiluxIOS/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = com.bilux.nuclearascension; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = 1; SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG; }; name = Debug; };
+		3C9FCD91081D496CE5DB77E0 /* Release */ = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon; CODE_SIGN_ENTITLEMENTS = BiluxIOS/BiluxIOS.entitlements; CODE_SIGN_STYLE = Automatic; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = BiluxIOS/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 17.0; PRODUCT_BUNDLE_IDENTIFIER = com.bilux.nuclearascension; PRODUCT_NAME = "$(TARGET_NAME)"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = 1; }; name = Release; };
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		8AC64F79374AFE2C8C5B6B15 = {isa = XCConfigurationList; buildConfigurations = (0E49001574942847AE5AF465 /* Debug */, 54667FDE2D0A0F296B2C6646 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		F6282F1F8302DEED6C065DE0 = {isa = XCConfigurationList; buildConfigurations = (4CCE5B0B8FA7019988A972E7 /* Debug */, 3C9FCD91081D496CE5DB77E0 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+/* End XCConfigurationList section */
+	};
+	rootObject = 439A1489934641902C60A204 /* Project object */;
+}
