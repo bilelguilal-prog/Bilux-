@@ -85,11 +85,26 @@ struct HomeScreen: View {
                             Text("NUCLEAR ASCENSION").font(.system(size: 20, weight: .black, design: .serif)).tracking(2)
                                 .foregroundStyle(Nuclear.gold)
                         }.padding(.top, 14)
-                        Image("BiluxHero")
-                            .resizable().scaledToFill().frame(height: 270).clipped()
-                            .overlay(alignment: .bottom) {
-                                LinearGradient(colors: [.clear, Nuclear.background], startPoint: .center, endPoint: .bottom)
-                            }
+                        
+GeometryReader { geometry in
+    Image("BiluxHero")
+        .resizable()
+        .scaledToFill()
+        .frame(
+            width: geometry.size.width,
+            height: geometry.size.height
+        )
+        .clipped()
+        .overlay(alignment: .bottom) {
+            LinearGradient(
+                colors: [.clear, Nuclear.background],
+                startPoint: .center,
+                endPoint: .bottom
+            )
+        }
+}
+.frame(height: 270)
+
                         HStack(spacing: 14) {
                             VStack { Text("NIV.").font(.caption2); Text("\(journal.heroLevel)").font(.system(size: 35, weight: .black, design: .rounded)) }
                                 .foregroundStyle(Nuclear.gold)
@@ -319,7 +334,20 @@ struct AscensionScreen: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 15) {
-                    Image("BiluxHero").resizable().scaledToFill().frame(height: 250).clipped().clipShape(RoundedRectangle(cornerRadius: 15))
+                   
+GeometryReader { geometry in
+    Image("BiluxHero")
+        .resizable()
+        .scaledToFill()
+        .frame(
+            width: geometry.size.width,
+            height: geometry.size.height
+        )
+        .clipped()
+}
+.frame(height: 250)
+.clipShape(RoundedRectangle(cornerRadius: 15))
+ .frame(height: 250).clipped().clipShape(RoundedRectangle(cornerRadius: 15))
                     SectionCaption(title: "Ascension du héros")
                     NuclearCard {
                         Text("RANG \(journal.rankName.uppercased())").font(.title2.bold()).foregroundStyle(Nuclear.gold)
