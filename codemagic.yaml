@@ -26,7 +26,7 @@ workflows:
     instance_type: mac_mini_m2
     max_build_duration: 90
     integrations:
-      app_store_connect: BILUX-Codemagic. # REMPLACER par le nom de votre integration Codemagic
+      app_store_connect: BILUX-Codemagic # REMPLACER par le nom de votre integration Codemagic
     environment:
       xcode: latest
       ios_signing:
