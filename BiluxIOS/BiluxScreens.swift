@@ -163,7 +163,7 @@ private struct NuclearHeroAura: View {
                 )
                 .frame(width: width, height: height)
                 .scaleEffect(energized && animate ? 1.12 : 0.94)
-                .animation(animate ? .easeInOut(duration: 2.6).repeatForever(autoreverses: true) : nil,
+                .animation(animate ? .easeInOut(duration: 6.5).repeatForever(autoreverses: true) : nil,
                            value: energized)
                 .blendMode(.screen)
                 .allowsHitTesting(false)
@@ -178,7 +178,7 @@ private struct NuclearHeroAura: View {
                     )
                     .frame(width: min(width * 0.64, 235), height: min(width * 0.64, 235))
                     .rotationEffect(.degrees(energized && animate ? 24 : -12))
-                    .animation(animate ? .easeInOut(duration: 3.2).repeatForever(autoreverses: true) : nil,
+                    .animation(animate ? .easeInOut(duration: 8.0).repeatForever(autoreverses: true) : nil,
                                value: energized)
                     .opacity(lockedPreview ? 0.32 : 0.75)
                     .blendMode(.screen)
@@ -248,11 +248,11 @@ private struct NuclearHeroAura: View {
         // Animation uniquement sur l'opacite (jamais sur frame / scaledToFill).
         outgoingArtwork = former.artwork
         incomingOpacity = 0
-        withAnimation(.easeInOut(duration: 0.55)) {
+        withAnimation(.easeInOut(duration: 1.8)) {
             incomingOpacity = 1
         }
         fadeTask = Task {
-            try? await Task.sleep(nanoseconds: 650_000_000)
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
             guard !Task.isCancelled else { return }
             outgoingArtwork = nil
         }
@@ -724,7 +724,7 @@ struct HomeScreen: View {
                         Circle().stroke(Nuclear.gold.opacity(0.65), lineWidth: 1)
                             .frame(width: 62, height: 62)
                             .scaleEffect(pulse ? 1.04 : 0.93)
-                            .animation((effectsEnabled && !reduceMotion) ? .easeInOut(duration: 2.5).repeatForever(autoreverses: true) : .none, value: pulse)
+                            .animation((effectsEnabled && !reduceMotion) ? .easeInOut(duration: 6.5).repeatForever(autoreverses: true) : .none, value: pulse)
                         Image(systemName: "crown.fill")
                             .font(.system(size: 27)).foregroundStyle(Nuclear.paleGold)
                     }
