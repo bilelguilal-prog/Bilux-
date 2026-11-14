@@ -347,7 +347,6 @@ GeometryReader { geometry in
 }
 .frame(height: 250)
 .clipShape(RoundedRectangle(cornerRadius: 15))
- .frame(height: 250).clipped().clipShape(RoundedRectangle(cornerRadius: 15))
                     SectionCaption(title: "Ascension du héros")
                     NuclearCard {
                         Text("RANG \(journal.rankName.uppercased())").font(.title2.bold()).foregroundStyle(Nuclear.gold)

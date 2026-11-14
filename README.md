@@ -1,3 +1,5 @@
+> **NOUVEAU :** [Guide BILUX V4.1 — Nuclear Watch](GUIDE_BILUX_V41_WATCH.md) (Watch Series 10, codemagic, TestFlight).
+
 # BILUX — V4 iPhone sans Mac personnel
 
 **Statut : projet SwiftUI + HealthKit prêt à être tenté sur un Mac de compilation hébergé. Ce ZIP n'est PAS une application installable.** Le code n'a pas été compilé ni vérifié sur iPhone réel.
