@@ -1,23 +1,32 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+// BILUX V5.1 — nouveau langage visuel, sans modification du modèle de données.
 private enum Nuclear {
-    static let background = Color(red: 0.055, green: 0.043, blue: 0.07)
-    static let panel = Color(red: 0.115, green: 0.085, blue: 0.12)
-    static let gold = Color(red: 1, green: 0.72, blue: 0.24)
-    static let purple = Color(red: 0.65, green: 0.4, blue: 1)
-    static let ink = Color(red: 0.95, green: 0.88, blue: 0.77)
+    static let background = Color(red: 0.025, green: 0.027, blue: 0.046)
+    static let panel = Color(red: 0.085, green: 0.078, blue: 0.119)
+    static let gold = Color(red: 1.0, green: 0.77, blue: 0.33)
+    static let paleGold = Color(red: 1.0, green: 0.91, blue: 0.64)
+    static let purple = Color(red: 0.69, green: 0.40, blue: 1.0)
+    static let ink = Color(red: 0.94, green: 0.93, blue: 0.95)
+    static let muted = Color(red: 0.64, green: 0.63, blue: 0.73)
 }
 
 struct MainTabs: View {
     @State private var selected: Int = 0
+
     var body: some View {
         TabView(selection: $selected) {
-            HomeScreen().tabItem { Label("QG", systemImage: "house.fill") }.tag(0)
-            SportScreen().tabItem { Label("Sport", systemImage: "dumbbell.fill") }.tag(1)
-            NutritionScreen().tabItem { Label("Nutrition", systemImage: "fork.knife") }.tag(2)
-            HealthScreen().tabItem { Label("Santé", systemImage: "heart.text.square.fill") }.tag(3)
-            AscensionScreen().tabItem { Label("Avatar", systemImage: "bolt.shield.fill") }.tag(4)
+            HomeScreen(selectedTab: $selected)
+                .tabItem { Label("Accueil", systemImage: "house.fill") }.tag(0)
+            SportScreen()
+                .tabItem { Label("Sport", systemImage: "dumbbell.fill") }.tag(1)
+            NutritionScreen()
+                .tabItem { Label("Nutrition", systemImage: "fork.knife") }.tag(2)
+            HealthScreen()
+                .tabItem { Label("Santé", systemImage: "heart.text.square.fill") }.tag(3)
+            AscensionScreen()
+                .tabItem { Label("Ascension", systemImage: "crown.fill") }.tag(4)
         }
         .tint(Nuclear.gold)
         .background(Nuclear.background)
@@ -26,32 +35,54 @@ struct MainTabs: View {
 
 struct PageBackground: ViewModifier {
     func body(content: Content) -> some View {
-        content
-            .background {
-                LinearGradient(colors: [Nuclear.background, Color(red:0.14,green:0.07,blue:0.17), Nuclear.background], startPoint: .top, endPoint: .bottom)
-                    .ignoresSafeArea()
-            }
+        content.background {
+            ZStack {
+                Nuclear.background
+                LinearGradient(
+                    colors: [Nuclear.purple.opacity(0.17), .clear, Nuclear.gold.opacity(0.07), Nuclear.background],
+                    startPoint: .topLeading, endPoint: .bottomTrailing
+                )
+                RadialGradient(colors: [Nuclear.purple.opacity(0.14), .clear],
+                               center: .topTrailing, startRadius: 15, endRadius: 310)
+            }.ignoresSafeArea()
+        }
     }
 }
 
 struct NuclearCard<Content: View>: View {
     let content: Content
     init(@ViewBuilder content: () -> Content) { self.content = content() }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) { content }
-            .padding(15)
+        VStack(alignment: .leading, spacing: 11) { content }
+            .padding(16)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Nuclear.panel.opacity(0.91), in: RoundedRectangle(cornerRadius: 15))
-            .overlay(RoundedRectangle(cornerRadius: 15).stroke(Nuclear.gold.opacity(0.40), lineWidth: 0.8))
+            .background {
+                RoundedRectangle(cornerRadius: 19, style: .continuous)
+                    .fill(LinearGradient(colors: [Color(red:0.14,green:0.12,blue:0.19), Nuclear.panel],
+                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 19, style: .continuous)
+                    .stroke(LinearGradient(colors: [Nuclear.gold.opacity(0.39),
+                                                    Nuclear.purple.opacity(0.20), Color.white.opacity(0.04)],
+                                           startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1)
+            }
+            .shadow(color: Nuclear.purple.opacity(0.07), radius: 15, y: 5)
     }
 }
 
 struct SectionCaption: View {
     let title: String
     var body: some View {
-        Text(title.uppercased())
-            .font(.caption.weight(.heavy)).tracking(2).foregroundStyle(Nuclear.gold)
-            .padding(.top, 5)
+        HStack(spacing: 8) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(Nuclear.gold).frame(width: 3, height: 15)
+            Text(title.uppercased())
+                .font(.system(size: 12, weight: .black, design: .rounded))
+                .tracking(1.8).foregroundStyle(Nuclear.paleGold)
+            Spacer(minLength: 0)
+        }.padding(.top, 7)
     }
 }
 
@@ -60,122 +91,222 @@ struct StatTile: View {
     let value: String
     let icon: String
     var accent: Color = Nuclear.gold
+
     var body: some View {
         NuclearCard {
-            Label(label.uppercased(), systemImage: icon)
-                .font(.caption2.weight(.bold)).foregroundStyle(accent)
-                .lineLimit(2)
-                .minimumScaleFactor(0.75)
-            Text(value).font(.system(size: 24, weight: .heavy, design: .rounded)).foregroundStyle(.white)
-                .lineLimit(1).minimumScaleFactor(0.6)
+            Image(systemName: icon)
+                .font(.system(size: 21, weight: .semibold))
+                .foregroundStyle(accent)
+                .frame(height: 25, alignment: .leading)
+            Text(value)
+                .font(.system(size: 23, weight: .black, design: .rounded))
+                .foregroundStyle(.white).lineLimit(1).minimumScaleFactor(0.6)
+            Text(label.uppercased())
+                .font(.system(size: 9, weight: .bold, design: .rounded))
+                .foregroundStyle(Nuclear.muted).lineLimit(2)
         }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+private struct NuclearModuleTile: View {
+    let title: String
+    let detail: String
+    let symbol: String
+    let accent: Color
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 8) {
+                Image(systemName: symbol)
+                    .font(.system(size: 28, weight: .semibold))
+                    .foregroundStyle(accent)
+                    .frame(height: 37)
+                Spacer(minLength: 0)
+                HStack(spacing: 5) {
+                    Text(title).font(.system(size: 18, weight: .bold, design: .rounded))
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right").font(.caption2.bold())
+                }.foregroundStyle(.white)
+                Text(detail).font(.caption2).foregroundStyle(Nuclear.muted)
+                    .multilineTextAlignment(.leading).lineLimit(2)
+            }
+            .padding(16).frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: 140)
+            .background {
+                RoundedRectangle(cornerRadius: 21, style: .continuous)
+                    .fill(LinearGradient(colors: [accent.opacity(0.21), Nuclear.panel],
+                                         startPoint: .topLeading, endPoint: .bottomTrailing))
+            }
+            .overlay {
+                RoundedRectangle(cornerRadius: 21, style: .continuous)
+                    .stroke(accent.opacity(0.46), lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
     }
 }
 
 struct HomeScreen: View {
+    @Binding var selectedTab: Int
     @EnvironmentObject private var journal: BiluxStore
     @EnvironmentObject private var health: HealthKitManager
+    @State private var pulse = false
+
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 17) {
-                    VStack(spacing: 0) {
-                        VStack(spacing: 0) {
-                            Text("BILUX").font(.system(size: 39, weight: .black, design: .serif)).tracking(4).foregroundStyle(.white)
-                            Text("NUCLEAR ASCENSION").font(.system(size: 20, weight: .black, design: .serif)).tracking(2)
-                                .foregroundStyle(Nuclear.gold)
-                        }.padding(.top, 14)
-                        
-GeometryReader { geometry in
-    Image("BiluxHero")
-        .resizable()
-        .scaledToFill()
-        .frame(
-            width: geometry.size.width,
-            height: geometry.size.height
-        )
-        .clipped()
-        .overlay(alignment: .bottom) {
-            LinearGradient(
-                colors: [.clear, Nuclear.background],
-                startPoint: .center,
-                endPoint: .bottom
-            )
-        }
-}
-.frame(height: 270)
-
-                        HStack(spacing: 14) {
-                            VStack { Text("NIV.").font(.caption2); Text("\(journal.heroLevel)").font(.system(size: 35, weight: .black, design: .rounded)) }
-                                .foregroundStyle(Nuclear.gold)
-                            VStack(alignment: .leading, spacing: 7) {
-                                Text("RANG · \(journal.rankName.uppercased())").font(.headline).foregroundStyle(Nuclear.ink)
-                                ProgressView(value: journal.xpFraction).tint(Nuclear.gold)
-                                Text("\(journal.totalXP) XP • \(100 - journal.totalXP % 100) avant le prochain niveau")
-                                    .font(.caption2).foregroundStyle(.secondary)
-                            }
-                        }.padding(12)
-                    }
-                    .background(Nuclear.panel)
-                    .clipShape(RoundedRectangle(cornerRadius: 18))
-                    .overlay(RoundedRectangle(cornerRadius: 18).stroke(Nuclear.gold.opacity(0.8), lineWidth: 1))
-                    SectionCaption(title: "Système de transformation")
-                    HStack(spacing: 5) {
-                        ForEach(Array(["SURVIVANT", "ÉVEIL", "RÉACTEUR", "NUCLÉAIRE", "ASCENSION"].enumerated()), id: \.offset) { index, title in
-                            VStack(spacing: 6) {
-                                Image(systemName: index <= formIndex ? "bolt.fill" : "lock.fill")
-                                    .foregroundStyle(index <= formIndex ? Nuclear.gold : .gray)
-                                Text(title).font(.system(size: 7, weight: .heavy)).minimumScaleFactor(0.6).lineLimit(1)
-                            }
-                            .frame(maxWidth: .infinity).padding(.vertical, 12)
-                            .background(index == formIndex ? Nuclear.gold.opacity(0.2) : Nuclear.panel, in: RoundedRectangle(cornerRadius: 8))
-                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(index == formIndex ? Nuclear.gold : .gray.opacity(0.2)))
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 19) {
+                    HStack(alignment: .center) {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text("BILUX").font(.system(size: 37, weight: .black, design: .rounded))
+                                .tracking(2).foregroundStyle(.white)
+                            Text("N U C L E A R   A S C E N S I O N")
+                                .font(.system(size: 9, weight: .bold)).foregroundStyle(Nuclear.gold)
                         }
+                        Spacer()
+                        Image(systemName: "bolt.shield.fill")
+                            .font(.system(size: 24))
+                            .foregroundStyle(Nuclear.gold)
+                            .padding(12)
+                            .background(Nuclear.gold.opacity(0.10), in: Circle())
                     }
-                    SectionCaption(title: "Aujourd'hui · données réelles")
-                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 9) {
+                    heroPanel
+                    SectionCaption(title: "Ton centre de commandement")
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                        NuclearModuleTile(title: "Sport", detail: "Séances & performances", symbol: "dumbbell.fill", accent: Nuclear.gold) { selectedTab = 1 }
+                        NuclearModuleTile(title: "Nutrition", detail: "Carburant du réacteur", symbol: "fork.knife", accent: Color(red:0.45,green:0.89,blue:0.61)) { selectedTab = 2 }
+                        NuclearModuleTile(title: "Santé", detail: "Sommeil & Apple Santé", symbol: "heart.text.square.fill", accent: Nuclear.purple) { selectedTab = 3 }
+                        NuclearModuleTile(title: "Ascension", detail: "Niveaux & missions", symbol: "crown.fill", accent: Nuclear.paleGold) { selectedTab = 4 }
+                    }
+                    SectionCaption(title: "Tes statistiques du jour")
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 11) {
                         StatTile(label: "Pas", value: count(health.today.steps), icon: "figure.walk")
                         StatTile(label: "Dépense active", value: unit(health.today.activeKcal, "kcal"), icon: "flame.fill")
-                        StatTile(label: "Nutrition", value: unit(health.today.consumedKcal ?? (journal.todaysMeals.isEmpty ? nil : journal.todaysCalories), "kcal"), icon: "fork.knife")
+                        StatTile(label: "Nutrition", value: unit(health.today.consumedKcal ?? (journal.todaysMeals.isEmpty ? nil : journal.todaysCalories), "kcal"), icon: "fork.knife", accent: .green)
                         StatTile(label: "Sommeil", value: unit(health.today.sleepHours, "h", decimals: 1), icon: "moon.stars.fill", accent: Nuclear.purple)
                     }
-                    if !health.hasRequested {
-                        Button { Task { await health.connect() } } label: {
-                            Label("CONNECTER APPLE SANTÉ", systemImage: "heart.fill").frame(maxWidth: .infinity)
-                        }.buttonStyle(.borderedProminent).tint(Nuclear.gold)
-                    } else {
-                        Button { Task { await health.refresh() } } label: {
-                            Label(health.loading ? "Synchronisation…" : "Actualiser les données Santé", systemImage: "arrow.clockwise")
-                        }.disabled(health.loading).tint(Nuclear.gold)
-                    }
-                    SectionCaption(title: "Missions du jour")
+                    healthButton
+                    SectionCaption(title: "Quêtes du jour")
                     NuclearCard {
+                        HStack {
+                            Image(systemName: "flag.checkered.2.crossed").foregroundStyle(Nuclear.gold)
+                            Text("JOURNAL D'ASCENSION").font(.caption.bold()).tracking(1)
+                            Spacer()
+                            Text("+ XP").font(.caption2.bold()).foregroundStyle(Nuclear.gold)
+                        }
                         quest("Consigner une séance", done: journal.data.workouts.contains { BiluxFormat.sameDay($0.date, .now) }, xp: "25 XP")
                         quest("Suivre l'alimentation", done: !journal.todaysMeals.isEmpty || health.today.consumedKcal != nil, xp: "8 XP")
                         quest("Noter ton ressenti", done: journal.data.checkins.contains { BiluxFormat.sameDay($0.date, .now) }, xp: "8 XP")
                     }
-                    Text("L'XP récompense le suivi. Aucun malus pour le repos. Les données médicales ne déterminent jamais un score de santé.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }.padding(16)
+                    SectionCaption(title: "Les cinq transformations")
+                    HStack(spacing: 5) {
+                        ForEach(Array(["SURVIVANT", "ÉVEIL", "RÉACTEUR", "NUCLÉAIRE", "ASCENSION"].enumerated()), id: \.offset) { index, title in
+                            VStack(spacing: 7) {
+                                Image(systemName: index <= formIndex ? "bolt.fill" : "lock.fill")
+                                    .font(.caption).foregroundStyle(index <= formIndex ? Nuclear.gold : Nuclear.muted)
+                                Text(title).font(.system(size: 7, weight: .heavy)).lineLimit(1).minimumScaleFactor(0.5)
+                                    .foregroundStyle(index <= formIndex ? .white : Nuclear.muted)
+                            }
+                            .frame(maxWidth: .infinity).padding(.vertical, 12)
+                            .background(index == formIndex ? Nuclear.gold.opacity(0.19) : Nuclear.panel,
+                                        in: RoundedRectangle(cornerRadius: 11))
+                            .overlay(RoundedRectangle(cornerRadius: 11).stroke(index == formIndex ? Nuclear.gold : Nuclear.purple.opacity(0.20)))
+                        }
+                    }
+                    Text("Tes XP récompensent le suivi personnel, pas tes résultats médicaux. Le repos n'entraîne aucun malus.")
+                        .font(.caption2).foregroundStyle(Nuclear.muted)
+                        .padding(.bottom, 10)
+                }
+                .padding(.horizontal, 16).padding(.top, 16).padding(.bottom, 22)
             }
-            .navigationTitle("Centre de commandement").navigationBarTitleDisplayMode(.inline)
+            .toolbar(.hidden, for: .navigationBar)
             .modifier(PageBackground())
             .task { if health.hasRequested { await health.refresh() } }
+            .onAppear { pulse = true }
             .alert("BILUX", isPresented: Binding(get: { health.message != nil }, set: { if !$0 { health.message = nil } })) {
                 Button("OK") { health.message = nil }
             } message: { Text(health.message ?? "") }
         }
     }
+
+    private var heroPanel: some View {
+        ZStack(alignment: .bottomLeading) {
+            GeometryReader { geometry in
+                Image("BiluxHero")
+                    .resizable().scaledToFill()
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    .clipped()
+            }
+            LinearGradient(colors: [.clear, Nuclear.background.opacity(0.53), Nuclear.background],
+                           startPoint: .top, endPoint: .bottom)
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top) {
+                    ZStack {
+                        Circle().stroke(Nuclear.gold.opacity(0.4), lineWidth: 2).frame(width: 70, height: 70)
+                        Circle().stroke(Nuclear.gold.opacity(0.65), lineWidth: 1)
+                            .frame(width: 62, height: 62)
+                            .scaleEffect(pulse ? 1.04 : 0.93)
+                            .animation(.easeInOut(duration: 2.5).repeatForever(autoreverses: true), value: pulse)
+                        Image(systemName: "crown.fill")
+                            .font(.system(size: 27)).foregroundStyle(Nuclear.paleGold)
+                    }
+                    Spacer()
+                    Text("RANG · \(journal.rankName.uppercased())")
+                        .font(.caption2.bold()).tracking(0.7).foregroundStyle(Nuclear.paleGold)
+                        .padding(.horizontal, 10).padding(.vertical, 7)
+                        .background(Nuclear.background.opacity(0.77), in: Capsule())
+                }
+                Spacer(minLength: 0)
+                HStack(alignment: .firstTextBaseline, spacing: 7) {
+                    Text("NIVEAU").font(.caption.bold()).tracking(1.5).foregroundStyle(Nuclear.paleGold)
+                    Text("\(journal.heroLevel)")
+                        .font(.system(size: 39, weight: .black, design: .rounded))
+                        .foregroundStyle(.white)
+                }
+                ProgressView(value: journal.xpFraction).tint(Nuclear.gold)
+                HStack {
+                    Text("\(journal.totalXP) XP").font(.caption.bold()).foregroundStyle(Nuclear.paleGold)
+                    Spacer()
+                    Text("\(100 - journal.totalXP % 100) XP avant le prochain niveau")
+                        .font(.caption2).foregroundStyle(.white.opacity(0.8))
+                }
+            }.padding(18)
+        }
+        .frame(height: 275)
+        .clipShape(RoundedRectangle(cornerRadius: 23, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 23, style: .continuous)
+                    .stroke(LinearGradient(colors: [Nuclear.paleGold, Nuclear.purple.opacity(0.7), Nuclear.gold.opacity(0.4)],
+                                           startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.4))
+        .shadow(color: Nuclear.gold.opacity(0.17), radius: 18, y: 6)
+    }
+
+    @ViewBuilder private var healthButton: some View {
+        if !health.hasRequested {
+            Button { Task { await health.connect() } } label: {
+                Label("CONNECTER APPLE SANTÉ", systemImage: "heart.fill").frame(maxWidth: .infinity)
+            }.buttonStyle(.borderedProminent).tint(Nuclear.gold)
+        } else {
+            Button { Task { await health.refresh() } } label: {
+                Label(health.loading ? "Synchronisation…" : "Actualiser Apple Santé", systemImage: "arrow.clockwise")
+                    .frame(maxWidth: .infinity)
+            }.disabled(health.loading).buttonStyle(.bordered).tint(Nuclear.gold)
+        }
+    }
+
     private var formIndex: Int {
         switch journal.heroLevel { case 15...: return 4; case 10...: return 3; case 6...: return 2; case 3...: return 1; default: return 0 }
     }
     private func quest(_ label: String, done: Bool, xp: String) -> some View {
         HStack {
-            Image(systemName: done ? "checkmark.square.fill" : "square").foregroundStyle(Nuclear.gold)
+            Image(systemName: done ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(done ? Color.green : Nuclear.gold)
             Text(label).font(.subheadline)
             Spacer(minLength: 8)
-            Text(done ? "✓" : "+\(xp)").font(.caption.bold()).foregroundStyle(Nuclear.gold)
-        }
+            Text(done ? "TERMINÉ" : "+\(xp)")
+                .font(.caption2.bold()).foregroundStyle(done ? .green : Nuclear.gold)
+        }.padding(.vertical, 3)
     }
 }
 
@@ -193,12 +324,33 @@ struct SportScreen: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 15) {
+                    ZStack(alignment: .bottomLeading) {
+                        LinearGradient(colors: [Nuclear.gold.opacity(0.28), Nuclear.purple.opacity(0.20), Nuclear.panel],
+                                       startPoint: .topLeading, endPoint: .bottomTrailing)
+                        HStack(alignment: .center, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text("LA FORGE").font(.system(size: 27, weight: .black, design: .rounded))
+                                    .foregroundStyle(.white)
+                                Text("Chaque séance forge ton ascension")
+                                    .font(.caption).foregroundStyle(Nuclear.paleGold)
+                                Text("Tes exercices et séances restent modifiables")
+                                    .font(.caption2).foregroundStyle(Nuclear.muted)
+                            }
+                            Spacer(minLength: 0)
+                            Image(systemName: "dumbbell.fill")
+                                .font(.system(size: 39, weight: .semibold))
+                                .foregroundStyle(Nuclear.gold)
+                        }.padding(18)
+                    }
+                    .frame(height: 115)
+                    .clipShape(RoundedRectangle(cornerRadius: 20))
+                    .overlay(RoundedRectangle(cornerRadius: 20).stroke(Nuclear.gold.opacity(0.48)))
                     SectionCaption(title: "Journal de combat")
                     HStack {
                         StatTile(label: "Séances", value: "\(journal.data.workouts.count)", icon: "dumbbell.fill")
                         StatTile(label: "Volume total", value: unit(journal.data.workouts.reduce(0) { $0 + $1.volume }, "kg·rép"), icon: "chart.line.uptrend.xyaxis")
                     }
-                    Button { showNew = true } label: { Label("NOUVELLE SÉANCE LIBRE", systemImage: "plus.circle.fill").frame(maxWidth: .infinity) }
+                    Button { showNew = true } label: { Label("CRÉER UNE SÉANCE", systemImage: "plus.circle.fill").frame(maxWidth: .infinity) }
                         .buttonStyle(.borderedProminent).tint(Nuclear.gold)
                     SectionCaption(title: "Historique")
                     if journal.data.workouts.isEmpty { NuclearCard { Text("Aucune séance. Enregistre ton premier entraînement libre.").foregroundStyle(.secondary) } }
@@ -355,13 +507,31 @@ GeometryReader { geometry in
 }
 .frame(height: 250)
 .clipShape(RoundedRectangle(cornerRadius: 15))
-                    SectionCaption(title: "Ascension du héros")
+                    SectionCaption(title: "Ton ascension")
                     NuclearCard {
-                        Text("RANG \(journal.rankName.uppercased())").font(.title2.bold()).foregroundStyle(Nuclear.gold)
-                        Text("Niveau \(journal.heroLevel) • \(journal.totalXP) XP")
-                        ProgressView(value: journal.xpFraction).tint(Nuclear.gold)
-                        Text("+25 XP par séance, +8 XP par jour avec repas Bilux, +8 XP par jour avec bilan Bilux. Le repos n'enlève aucun point.")
-                            .font(.caption).foregroundStyle(.secondary)
+                        HStack(spacing: 17) {
+                            ZStack {
+                                Circle().stroke(Nuclear.purple.opacity(0.20), lineWidth: 8)
+                                Circle().trim(from: 0, to: journal.xpFraction)
+                                    .stroke(Nuclear.gold, style: StrokeStyle(lineWidth: 8, lineCap: .round))
+                                    .rotationEffect(.degrees(-90))
+                                VStack(spacing: 3) {
+                                    Image(systemName: "crown.fill").foregroundStyle(Nuclear.gold)
+                                    Text("\(Int(journal.xpFraction * 100))%")
+                                        .font(.title3.bold()).foregroundStyle(.white)
+                                }
+                            }.frame(width: 94, height: 94)
+                            VStack(alignment: .leading, spacing: 7) {
+                                Text("RANG \(journal.rankName.uppercased())")
+                                    .font(.caption.bold()).tracking(1).foregroundStyle(Nuclear.gold)
+                                Text("NIVEAU \(journal.heroLevel)")
+                                    .font(.title2.bold()).foregroundStyle(.white)
+                                Text("\(journal.totalXP) XP total")
+                                    .font(.caption).foregroundStyle(Nuclear.muted)
+                            }
+                        }
+                        Text("+25 XP par séance, +8 XP par jour de repas saisis et +8 XP par jour de bilan. Aucun malus de repos.")
+                            .font(.caption).foregroundStyle(Nuclear.muted)
                     }
                     SectionCaption(title: "Continuité depuis la V3 web")
                     NuclearCard {
@@ -385,7 +555,7 @@ GeometryReader { geometry in
                         .font(.caption).foregroundStyle(.secondary)
                 }.padding(16)
             }
-            .navigationTitle("Avatar").modifier(PageBackground())
+            .navigationTitle("Ascension").modifier(PageBackground())
             .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.json]) { result in
                 switch result {
                 case .success(let url): journal.importJSON(url)
