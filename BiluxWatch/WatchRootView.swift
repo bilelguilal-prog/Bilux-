@@ -243,11 +243,11 @@ private struct V54ReactorXPRing: View {
 
     private var normalized: Double { min(1, max(0, progress.isFinite ? progress : 0)) }
     private var symbol: String {
-        switch level {
-        case 15...: return "crown.fill"
-        case 10...: return "atom"
-        case 6...: return "bolt.fill"
-        case 3...: return "sparkles"
+        switch rank.uppercased() {
+        case "ASCENSION": return "crown.fill"
+        case "NUCLÉAIRE": return "atom"
+        case "RÉACTEUR": return "bolt.fill"
+        case "ÉVEIL": return "sparkles"
         default: return "shield.fill"
         }
     }

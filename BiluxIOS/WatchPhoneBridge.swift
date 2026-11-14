@@ -34,32 +34,24 @@ final class WatchPhoneBridge: NSObject, WCSessionDelegate {
     }
 
     private func updateSnapshot(data: BiluxData, health: DailyHealthSummary) {
-        let xp = data.workouts.count * 25
-            + Set(data.meals.map { Calendar.current.startOfDay(for: $0.date) }).count * 8
-            + Set(data.checkins.map { Calendar.current.startOfDay(for: $0.date) }).count * 8
-        let level = max(1, xp / 100 + 1)
-        let rank: String
-        switch level {
-        case 15...: rank = "ASCENSION"
-        case 10...: rank = "NUCLÉAIRE"
-        case 6...: rank = "RÉACTEUR"
-        case 3...: rank = "ÉVEIL"
-        default: rank = "SURVIVANT"
-        }
+        let xp = BILUXV55Progression.totalXP(data)
+        let level = BILUXV55Progression.heroLevel(data)
+        let rank = BILUXV55Progression.stageNames[BILUXV55Progression.stageIndex(data)]
         let now = Date()
-        let didWorkout = data.workouts.contains { Calendar.current.isDate($0.date, inSameDayAs: now) }
-        let didEat = data.meals.contains { Calendar.current.isDate($0.date, inSameDayAs: now) } || health.consumedKcal != nil
-        let didCheckin = data.checkins.contains { Calendar.current.isDate($0.date, inSameDayAs: now) }
+        let questStatus = BILUXV55Progression.currentQuestProgress(data, now: now)
+        let didWorkout = questStatus.todayWorkout
+        let didEat = questStatus.todayMeal
+        let didCheckin = questStatus.todayCheckin
         snapshot = WatchSnapshot(
             heroName: data.heroName, level: level, rank: rank,
-            totalXP: xp, xpProgress: Double(xp % 100) / 100,
+            totalXP: xp, xpProgress: BILUXV55Progression.fraction(data),
             steps: health.steps, activeKcal: health.activeKcal,
             latestHeartRate: health.heartRateBPM, sleepHours: health.sleepHours,
             workoutMinutes: health.workoutMinutes, energyConsumed: health.consumedKcal,
             quests: [
-                WatchQuest(id: "workout", title: "Consigner une séance", completed: didWorkout, reward: 25),
-                WatchQuest(id: "nutrition", title: "Suivre l'alimentation", completed: didEat, reward: 8),
-                WatchQuest(id: "checkin", title: "Noter son ressenti", completed: didCheckin, reward: 8)
+                WatchQuest(id: "workout", title: "Consigner une séance", completed: didWorkout, reward: 45),
+                WatchQuest(id: "nutrition", title: "Suivre l'alimentation", completed: didEat, reward: 6),
+                WatchQuest(id: "checkin", title: "Noter son ressenti", completed: didCheckin, reward: 6)
             ], updatedAt: now
         )
         sendSnapshot()

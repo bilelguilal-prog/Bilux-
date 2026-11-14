@@ -14,6 +14,11 @@ final class BiluxStore: ObservableObject {
         if let file = try? Data(contentsOf: url), let recovered = try? JSONDecoder().decode(BiluxData.self, from: file) {
             data = recovered
         }
+        // V5.5: la premiere migration fige les XP deja gagnes et les formes acquises.
+        if data.longAscensionAnchor == nil {
+            data.longAscensionAnchor = BILUXV55Progression.makeAnchor(data)
+            save()
+        }
     }
     func save() {
         do {
@@ -65,23 +70,16 @@ final class BiluxStore: ObservableObject {
         data.exerciseLibrary?.append(name)
         if saveImmediately { save() }
     }
-    var totalXP: Int {
-        let workoutXP = data.workouts.count * 25
-        let mealDays = Set(data.meals.map { Calendar.current.startOfDay(for: $0.date) }).count * 8
-        let checkinDays = Set(data.checkins.map { Calendar.current.startOfDay(for: $0.date) }).count * 8
-        return workoutXP + mealDays + checkinDays
+    var totalXP: Int { BILUXV55Progression.totalXP(data) }
+    var heroLevel: Int { BILUXV55Progression.heroLevel(data) }
+    var unlockedStageIndex: Int { BILUXV55Progression.stageIndex(data) }
+    var rankName: String { BILUXV55Progression.stageNames[unlockedStageIndex].capitalized }
+    var xpFraction: Double { BILUXV55Progression.fraction(data) }
+    var xpToNextLevel: Int { BILUXV55Progression.remainingXP(data) }
+    var questsToday: (workout: Bool, meal: Bool, checkin: Bool) {
+        let value = BILUXV55Progression.currentQuestProgress(data)
+        return (value.todayWorkout, value.todayMeal, value.todayCheckin)
     }
-    var heroLevel: Int { max(1, totalXP / 100 + 1) }
-    var rankName: String {
-        switch heroLevel {
-        case 15...: return "Ascension"
-        case 10...: return "Nucléaire"
-        case 6...: return "Réacteur"
-        case 3...: return "Éveil"
-        default: return "Survivant"
-        }
-    }
-    var xpFraction: Double { Double(totalXP % 100) / 100.0 }
     var todaysMeals: [ManualMeal] { data.meals.filter { BiluxFormat.sameDay($0.date, .now) } }
     var todaysCalories: Double { todaysMeals.reduce(0) { $0 + $1.kcal } }
 
@@ -95,6 +93,7 @@ final class BiluxStore: ObservableObject {
                 throw ImportIssue.invalidFile
             }
             let result = try V3Import.parse(object)
+            let emptyBeforeImport = data.workouts.isEmpty && data.meals.isEmpty && data.checkins.isEmpty && data.labs.isEmpty
             let currentWorkouts = Set(data.workouts.map(\.id))
             let currentMeals = Set(data.meals.map(\.id))
             let currentCheckins = Set(data.checkins.map(\.id))
@@ -104,6 +103,12 @@ final class BiluxStore: ObservableObject {
             data.checkins.append(contentsOf: result.checkins.filter { !currentCheckins.contains($0.id) })
             data.labs.append(contentsOf: result.labs.filter { !currentLabs.contains($0.id) })
             if data.caloriesGoal == nil { data.caloriesGoal = result.caloriesGoal }
+            // Restauration complète du point de départ XP depuis une sauvegarde BILUX.
+            // Ne pas réécrire la progression d'un journal déjà actif.
+            if emptyBeforeImport {
+                data.longAscensionAnchor = result.longAscensionAnchor
+                    ?? BILUXV55Progression.makeAnchor(data)
+            }
             save()
             feedback = "Import terminé : \(result.workouts.count) séances, \(result.meals.count) repas, \(result.checkins.count) bilans et \(result.labs.count) résultats trouvés."
         } catch { feedback = "Import impossible : \(error.localizedDescription)" }

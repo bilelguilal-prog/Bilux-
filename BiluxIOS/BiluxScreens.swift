@@ -24,10 +24,10 @@ private struct NuclearStage: Identifiable {
 
     static let all: [NuclearStage] = [
         .init(id: 0, name: "SURVIVANT", minLevel: 1, subtitle: "Le premier souffle", symbol: "shield.fill", accent: .gray),
-        .init(id: 1, name: "ÉVEIL", minLevel: 3, subtitle: "L'étincelle intérieure", symbol: "sparkles", accent: Nuclear.gold),
-        .init(id: 2, name: "RÉACTEUR", minLevel: 6, subtitle: "Le coeur s'embrase", symbol: "bolt.fill", accent: .orange),
-        .init(id: 3, name: "NUCLÉAIRE", minLevel: 10, subtitle: "Le pouvoir rayonne", symbol: "atom", accent: Nuclear.purple),
-        .init(id: 4, name: "ASCENSION", minLevel: 15, subtitle: "Au-delà des limites", symbol: "crown.fill", accent: Nuclear.paleGold)
+        .init(id: 1, name: "ÉVEIL", minLevel: 11, subtitle: "L'étincelle intérieure", symbol: "sparkles", accent: Nuclear.gold),
+        .init(id: 2, name: "RÉACTEUR", minLevel: 31, subtitle: "Le coeur s'embrase", symbol: "bolt.fill", accent: .orange),
+        .init(id: 3, name: "NUCLÉAIRE", minLevel: 56, subtitle: "Le pouvoir rayonne", symbol: "atom", accent: Nuclear.purple),
+        .init(id: 4, name: "ASCENSION", minLevel: 81, subtitle: "Au-delà des limites", symbol: "crown.fill", accent: Nuclear.paleGold)
     ]
 
     var artwork: String {
@@ -113,6 +113,7 @@ private struct NuclearHeroAura: View {
     let level: Int
     let effectsEnabled: Bool
     let stageOverride: NuclearStage?
+    let minimumStage: Int
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     // V5.3.1 : on n'anime JAMAIS la taille du GeometryReader ou de la photo.
@@ -122,14 +123,15 @@ private struct NuclearHeroAura: View {
     @State private var incomingOpacity: Double = 1
     @State private var fadeTask: Task<Void, Never>? = nil
 
-    init(level: Int, effectsEnabled: Bool, stageOverride: NuclearStage? = nil) {
+    init(level: Int, effectsEnabled: Bool, stageOverride: NuclearStage? = nil, minimumStage: Int = 0) {
         self.level = level
         self.effectsEnabled = effectsEnabled
         self.stageOverride = stageOverride
+        self.minimumStage = minimumStage
     }
 
     private var stage: NuclearStage { stageOverride ?? NuclearStage.current(level: level) }
-    private var lockedPreview: Bool { stageOverride != nil && stage.minLevel > level }
+    private var lockedPreview: Bool { stageOverride != nil && stage.minLevel > level && stage.id > minimumStage }
     private var animate: Bool { effectsEnabled && !reduceMotion && !lockedPreview }
 
     var body: some View {
@@ -409,12 +411,15 @@ private struct NuclearMasteryTree: View {
 
 private struct NuclearLevelUp: View {
     let level: Int
+    let legacyStage: Int
     let onDismiss: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var revealed = false
 
-    private var stage: NuclearStage { NuclearStage.current(level: level) }
-    private var newForm: Bool { stage.minLevel == level }
+    private var stage: NuclearStage {
+        NuclearStage.all[max(NuclearStage.current(level: level).id, legacyStage)]
+    }
+    private var newForm: Bool { stage.minLevel == level && stage.id > legacyStage }
 
     var body: some View {
         ZStack {
@@ -610,8 +615,8 @@ struct HomeScreen: View {
     @State private var showLevelUp = false
 
     private var homeStage: NuclearStage {
-        NuclearStage.all.first(where: { $0.id == equippedTransformationID && $0.minLevel <= journal.heroLevel })
-            ?? NuclearStage.current(level: journal.heroLevel)
+        NuclearStage.all.first(where: { $0.id == equippedTransformationID && $0.id <= journal.unlockedStageIndex })
+            ?? NuclearStage.all[journal.unlockedStageIndex]
     }
 
     var body: some View {
@@ -656,9 +661,9 @@ struct HomeScreen: View {
                             Spacer()
                             Text("+ XP").font(.caption2.bold()).foregroundStyle(Nuclear.gold)
                         }
-                        quest("Consigner une séance", done: journal.data.workouts.contains { BiluxFormat.sameDay($0.date, .now) }, xp: "25 XP")
-                        quest("Suivre l'alimentation", done: !journal.todaysMeals.isEmpty || health.today.consumedKcal != nil, xp: "8 XP")
-                        quest("Noter ton ressenti", done: journal.data.checkins.contains { BiluxFormat.sameDay($0.date, .now) }, xp: "8 XP")
+                        quest("Consigner une séance", done: journal.questsToday.workout, xp: "45 XP")
+                        quest("Suivre l'alimentation", done: journal.questsToday.meal, xp: "6 XP")
+                        quest("Noter ton ressenti", done: journal.questsToday.checkin, xp: "6 XP")
                     }
                     SectionCaption(title: "Les cinq transformations")
                     HStack(spacing: 5) {
@@ -687,7 +692,7 @@ struct HomeScreen: View {
             .onAppear { pulse = true; checkForLevelUp() }
             .onChange(of: journal.heroLevel) { _, _ in checkForLevelUp() }
             .fullScreenCover(isPresented: $showLevelUp) {
-                NuclearLevelUp(level: journal.heroLevel) {
+                NuclearLevelUp(level: journal.heroLevel, legacyStage: journal.data.longAscensionAnchor?.legacyStage ?? 0) {
                     lastCelebratedLevel = max(lastCelebratedLevel, journal.heroLevel)
                     showLevelUp = false
                 }
@@ -711,7 +716,7 @@ struct HomeScreen: View {
     private var heroPanel: some View {
         ZStack(alignment: .bottomLeading) {
             GeometryReader { geometry in
-                NuclearHeroAura(level: journal.heroLevel, effectsEnabled: effectsEnabled, stageOverride: homeStage)
+                NuclearHeroAura(level: journal.heroLevel, effectsEnabled: effectsEnabled, stageOverride: homeStage, minimumStage: journal.unlockedStageIndex)
                     .frame(width: geometry.size.width, height: geometry.size.height)
                     .clipped()
             }
@@ -745,7 +750,7 @@ struct HomeScreen: View {
                 HStack {
                     Text("\(journal.totalXP) XP").font(.caption.bold()).foregroundStyle(Nuclear.paleGold)
                     Spacer()
-                    Text("\(100 - journal.totalXP % 100) XP avant le prochain niveau")
+                    Text(journal.heroLevel >= 100 ? "MAÎTRISE ULTIME" : "\(journal.xpToNextLevel) XP avant le prochain niveau")
                         .font(.caption2).foregroundStyle(.white.opacity(0.8))
                 }
             }.padding(18)
@@ -771,9 +776,7 @@ struct HomeScreen: View {
         }
     }
 
-    private var formIndex: Int {
-        switch journal.heroLevel { case 15...: return 4; case 10...: return 3; case 6...: return 2; case 3...: return 1; default: return 0 }
-    }
+    private var formIndex: Int { journal.unlockedStageIndex }
     private func quest(_ label: String, done: Bool, xp: String) -> some View {
         HStack {
             Image(systemName: done ? "checkmark.circle.fill" : "circle")
@@ -1033,7 +1036,7 @@ struct AscensionScreen: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 15) {
                     GeometryReader { geometry in
-                        NuclearHeroAura(level: journal.heroLevel, effectsEnabled: effectsEnabled, stageOverride: NuclearStage.all[selectedStage])
+                        NuclearHeroAura(level: journal.heroLevel, effectsEnabled: effectsEnabled, stageOverride: NuclearStage.all[selectedStage], minimumStage: journal.unlockedStageIndex)
                             .frame(width: geometry.size.width, height: geometry.size.height)
                             .clipped()
                     }
@@ -1063,16 +1066,17 @@ struct AscensionScreen: View {
                                     .font(.caption).foregroundStyle(Nuclear.muted)
                             }
                         }
-                        Text("+25 XP par séance, +8 XP par jour de repas saisis et +8 XP par jour de bilan. Aucun malus de repos.")
+                        Text("V5.5 : 45 XP par journée de séance (10 min min., max. 5 jours/semaine), 6 XP par journée de repas ou de ressenti, plus quêtes et boss. Aucun malus de repos.")
                             .font(.caption).foregroundStyle(Nuclear.muted)
                     }
+                    LongAscensionQuestBoard()
                     SectionCaption(title: "Les cinq transformations")
                     Text("Chaque rang a désormais un portrait différent. Une forme déverrouillée peut être équipée ; les rangs futurs restent en aperçu.")
                         .font(.caption).foregroundStyle(Nuclear.muted)
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 10) {
                             ForEach(NuclearStage.all) { stage in
-                                let unlocked = journal.heroLevel >= stage.minLevel
+                                let unlocked = journal.unlockedStageIndex >= stage.id
                                 Button { selectedStage = stage.id } label: {
                                     VStack(alignment: .leading, spacing: 9) {
                                         Image(systemName: unlocked ? stage.symbol : "lock.fill")
@@ -1098,15 +1102,15 @@ struct AscensionScreen: View {
                             Image(systemName: stage.symbol).foregroundStyle(stage.accent)
                         }
                         Text(stage.subtitle).foregroundStyle(.white)
-                        Text(journal.heroLevel >= stage.minLevel
-                             ? "Transformation acquise · niveau \(stage.minLevel)"
+                        Text(journal.unlockedStageIndex >= stage.id
+                             ? (journal.heroLevel < stage.minLevel ? "Forme acquise avant V5.5 · conservée" : "Transformation acquise · niveau \(stage.minLevel)")
                              : "Encore verrouillée · disponible au niveau \(stage.minLevel)")
                             .font(.caption).foregroundStyle(Nuclear.muted)
-                        if journal.heroLevel >= stage.minLevel {
+                        if journal.unlockedStageIndex >= stage.id {
                             Button {
                                 equippedTransformationID = stage.id
                             } label: {
-                                Label(equippedTransformationID == stage.id || (equippedTransformationID == -1 && NuclearStage.current(level: journal.heroLevel).id == stage.id)
+                                Label(equippedTransformationID == stage.id || (equippedTransformationID == -1 && journal.unlockedStageIndex == stage.id)
                                       ? "FORME ACTIVE" : "ÉQUIPER CETTE FORME",
                                       systemImage: "bolt.shield.fill")
                                     .frame(maxWidth: .infinity)
@@ -1171,8 +1175,8 @@ struct AscensionScreen: View {
             }
             .navigationTitle("Ascension").modifier(PageBackground())
             .onAppear {
-                let unlocked = NuclearStage.all.first(where: { $0.id == equippedTransformationID && $0.minLevel <= journal.heroLevel })
-                selectedStage = (unlocked ?? NuclearStage.current(level: journal.heroLevel)).id
+                let unlocked = NuclearStage.all.first(where: { $0.id == equippedTransformationID && $0.id <= journal.unlockedStageIndex })
+                selectedStage = (unlocked ?? NuclearStage.all[journal.unlockedStageIndex]).id
             }
             .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.json]) { result in
                 switch result {
@@ -1183,6 +1187,116 @@ struct AscensionScreen: View {
             .alert("BILUX", isPresented: Binding(get: { journal.feedback != nil }, set: { if !$0 { journal.feedback = nil } })) {
                 Button("OK") { journal.feedback = nil }
             } message: { Text(journal.feedback ?? "") }
+        }
+    }
+}
+
+// MARK: - BILUX V5.5 · THE LONG ASCENSION · Quêtes vivantes
+private struct LongAscensionQuestLine: View {
+    let title: String
+    let description: String
+    let icon: String
+    let current: Int
+    let target: Int
+    let xp: Int
+    var tint: Color = Nuclear.gold
+
+    private var progress: Double { Double(min(current, target)) / Double(max(1, target)) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(alignment: .top, spacing: 9) {
+                Image(systemName: current >= target ? "checkmark.seal.fill" : icon)
+                    .foregroundStyle(current >= target ? Color.green : tint)
+                    .frame(width: 22)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.subheadline.bold()).foregroundStyle(.white)
+                    Text(description).font(.caption2).foregroundStyle(Nuclear.muted)
+                }
+                Spacer(minLength: 4)
+                Text(current >= target ? "ACQUIS" : "+\(xp) XP")
+                    .font(.caption2.bold()).foregroundStyle(current >= target ? .green : Nuclear.paleGold)
+            }
+            ProgressView(value: progress).tint(tint)
+            Text("\(min(current, target)) / \(target)")
+                .font(.caption2.monospacedDigit()).foregroundStyle(Nuclear.muted)
+        }
+        .padding(.vertical, 5)
+    }
+}
+
+private struct LongAscensionQuestBoard: View {
+    @EnvironmentObject private var journal: BiluxStore
+
+    var body: some View {
+        let quests = BILUXV55Progression.currentQuestProgress(journal.data)
+        VStack(alignment: .leading, spacing: 14) {
+            SectionCaption(title: "Les épreuves de la semaine")
+            NuclearCard {
+                Text("LA FORGE · QUÊTES HEBDOMADAIRES")
+                    .font(.caption.bold()).tracking(1.1).foregroundStyle(Nuclear.paleGold)
+                LongAscensionQuestLine(title: "L'épreuve du guerrier",
+                    description: "3 jours avec une séance de 10 min ou plus",
+                    icon: "dumbbell.fill", current: quests.weeklyWorkouts, target: 3,
+                    xp: BILUXV55Progression.weeklyForgeXP)
+                LongAscensionQuestLine(title: "Le carburant du réacteur",
+                    description: "4 jours d'alimentation notée",
+                    icon: "fork.knife", current: quests.weeklyMeals, target: 4,
+                    xp: BILUXV55Progression.weeklyNutritionXP, tint: .green)
+                LongAscensionQuestLine(title: "Chroniques du survivant",
+                    description: "3 jours de ressenti enregistré",
+                    icon: "book.closed.fill", current: quests.weeklyCheckins, target: 3,
+                    xp: BILUXV55Progression.weeklyJournalXP, tint: Nuclear.purple)
+            }
+            SectionCaption(title: "Boss mensuel")
+            NuclearCard {
+                HStack(spacing: 12) {
+                    Image(systemName: "shield.lefthalf.filled")
+                        .font(.system(size: 30)).foregroundStyle(Nuclear.gold)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("LE GARDIEN DU RÉACTEUR")
+                            .font(.subheadline.bold()).foregroundStyle(.white)
+                        Text("12 journées de séance ce mois-ci, à ton rythme.")
+                            .font(.caption2).foregroundStyle(Nuclear.muted)
+                    }
+                }
+                ProgressView(value: Double(min(quests.monthlyWorkouts, 12)) / 12.0)
+                    .tint(Nuclear.purple)
+                HStack {
+                    Text("\(min(quests.monthlyWorkouts, 12)) / 12 journées")
+                    Spacer()
+                    Text(quests.monthlyWorkouts >= 12 ? "BOSS VAINCU" : "+140 XP")
+                }.font(.caption.bold()).foregroundStyle(Nuclear.paleGold)
+            }
+            SectionCaption(title: "Épreuve légendaire · Trimestre")
+            NuclearCard {
+                HStack(spacing: 12) {
+                    Image(systemName: "crown.fill")
+                        .font(.system(size: 30)).foregroundStyle(Nuclear.paleGold)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("LE SOUVERAIN DU NÉANT")
+                            .font(.subheadline.bold()).foregroundStyle(.white)
+                        Text("30 journées de séance en trois mois. À ton rythme, repos inclus.")
+                            .font(.caption2).foregroundStyle(Nuclear.muted)
+                    }
+                }
+                ProgressView(value: Double(min(quests.quarterWorkouts, 30)) / 30.0).tint(Nuclear.gold)
+                HStack {
+                    Text("\(min(quests.quarterWorkouts, 30)) / 30 journées")
+                    Spacer()
+                    Text(quests.quarterWorkouts >= 30 ? "LÉGENDE VAINCUE" : "+180 XP")
+                }.font(.caption.bold()).foregroundStyle(Nuclear.paleGold)
+            }
+            if journal.heroLevel >= 100 {
+                NuclearCard {
+                    Label("MAÎTRISE ULTIME · NIVEAU 100", systemImage: "crown.fill")
+                        .font(.headline.bold()).foregroundStyle(Nuclear.paleGold)
+                    Text("Le sommet du réacteur est atteint. Ton journal continue après le niveau 100.")
+                        .font(.caption).foregroundStyle(Nuclear.muted)
+                }
+            }
+            Text("Progression permanente. Aucune série obligatoire, aucun malus en repos, aucune XP sur les résultats médicaux. Les quêtes sont validées depuis le journal, une fois par période.")
+                .font(.caption2).foregroundStyle(Nuclear.muted)
         }
     }
 }
