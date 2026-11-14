@@ -11,7 +11,7 @@
 <key>CFBundleShortVersionString</key><string>1.0</string>
 <key>CFBundleVersion</key><string>3</string>
 <key>WKCompanionAppBundleIdentifier</key><string>com.bilux.nuclearascension</string>
-<key>WKWatchKitApp</key><true/>
+<key>WKApplication</key><true/>
 <key>WKRunsIndependentlyOfCompanionApp</key><false/>
 <key>NSHealthShareUsageDescription</key><string>Avec votre autorisation, BILUX Watch lit vos pas, calories actives et la dernière fréquence cardiaque pour le suivi sportif personnel.</string>
 <key>NSHealthUpdateUsageDescription</key><string>BILUX Watch ne modifie pas les données d’Apple Santé dans cette version.</string>
