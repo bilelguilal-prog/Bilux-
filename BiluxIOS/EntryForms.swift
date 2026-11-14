@@ -11,21 +11,43 @@ struct DraftExercise: Identifiable {
     var sets: [DraftSet] = [DraftSet()]
 }
 
+// Le même formulaire sert à créer ET à modifier une séance existante.
 struct NewWorkoutScreen: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var journal: BiluxStore
-    @State private var date = Date()
-    @State private var activity = "Musculation"
-    @State private var duration = "60"
-    @State private var notes = ""
-    @State private var rpe = 0
-    @State private var exercises = [DraftExercise()]
+
+    private let editingSession: WorkoutSession?
+    @State private var date: Date
+    @State private var activity: String
+    @State private var duration: String
+    @State private var notes: String
+    @State private var rpe: Int
+    @State private var exercises: [DraftExercise]
     @State private var error: String?
+
+    init(session: WorkoutSession? = nil) {
+        editingSession = session
+        _date = State(initialValue: session?.date ?? .now)
+        _activity = State(initialValue: session?.activity ?? "Musculation")
+        _duration = State(initialValue: String(session?.durationMinutes ?? 60))
+        _notes = State(initialValue: session?.notes ?? "")
+        _rpe = State(initialValue: session?.rpe ?? 0)
+        let drafts = session?.exercises.map { exercise in
+            DraftExercise(
+                id: exercise.id,
+                name: exercise.name,
+                sets: exercise.sets.map { set in
+                    DraftSet(id: set.id, reps: String(set.reps), weight: String(set.weight))
+                }
+            )
+        } ?? []
+        _exercises = State(initialValue: drafts.isEmpty ? [DraftExercise()] : drafts)
+    }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Séance libre") {
+                Section(editingSession == nil ? "Séance libre" : "Modifier la séance") {
                     DatePicker("Date", selection: $date, displayedComponents: .date)
                     TextField("Activité (musculation, marche…)", text: $activity)
                     TextField("Durée (minutes)", text: $duration).keyboardType(.numberPad)
@@ -37,36 +59,79 @@ struct NewWorkoutScreen: View {
                 }
                 ForEach($exercises) { $exercise in
                     Section("Exercice") {
-                        TextField("Nom de l'exercice", text: $exercise.name)
+                        Menu {
+                            if journal.exerciseNames.isEmpty {
+                                Text("Aucun exercice enregistré")
+                            } else {
+                                ForEach(journal.exerciseNames, id: \.self) { name in
+                                    Button(name) { exercise.name = name }
+                                }
+                            }
+                        } label: {
+                            Label(
+                                exercise.name.isEmpty ? "Choisir un exercice habituel" : "Exercices habituels : \(exercise.name)",
+                                systemImage: "chevron.down.circle"
+                            )
+                        }
+
+                        TextField("Ou saisir un nouvel exercice", text: $exercise.name)
+                            .textInputAutocapitalization(.words)
+                            .submitLabel(.done)
+                            .onSubmit { journal.registerExerciseName(exercise.name) }
+
+                        Button {
+                            let name = exercise.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                            guard !name.isEmpty else {
+                                error = "Indique le nom de l'exercice à ajouter."; return
+                            }
+                            journal.registerExerciseName(name)
+                        } label: {
+                            Label("Ajouter aux exercices habituels", systemImage: "bookmark.fill")
+                        }
+                        .disabled(exercise.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
                         ForEach($exercise.sets) { $set in
                             HStack {
                                 TextField("Répétitions", text: $set.reps).keyboardType(.numberPad)
                                 TextField("Charge en kg", text: $set.weight).keyboardType(.decimalPad)
                             }
                         }
-                        Button { exercise.sets.append(DraftSet()) } label: { Label("Ajouter une série", systemImage: "plus") }
+                        Button { exercise.sets.append(DraftSet()) } label: {
+                            Label("Ajouter une série", systemImage: "plus")
+                        }
                         if exercise.sets.count > 1 {
-                            Button("Retirer la dernière série") { exercise.sets.removeLast() }.foregroundStyle(.orange)
+                            Button("Retirer la dernière série") { exercise.sets.removeLast() }
+                                .foregroundStyle(.orange)
                         }
                     }
                 }
-                Button { exercises.append(DraftExercise()) } label: { Label("Ajouter un exercice", systemImage: "plus.circle") }
+                Button { exercises.append(DraftExercise()) } label: {
+                    Label("Ajouter un exercice", systemImage: "plus.circle")
+                }
             }
-            .navigationTitle("Nouvelle séance")
+            .navigationTitle(editingSession == nil ? "Nouvelle séance" : "Modifier la séance")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Annuler") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Enregistrer") { save() }.fontWeight(.bold) }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Enregistrer") { save() }.fontWeight(.bold)
+                }
             }
             .alert("Vérifie la saisie", isPresented: Binding(get: { error != nil }, set: { if !$0 { error = nil } })) {
                 Button("OK") { error = nil }
             } message: { Text(error ?? "") }
         }
     }
-    private func parseDouble(_ text: String) -> Double? { Double(text.replacingOccurrences(of: ",", with: ".")) }
+
+    private func parseDouble(_ text: String) -> Double? {
+        Double(text.replacingOccurrences(of: ",", with: "."))
+    }
+
     private func save() {
         let minutes = Int(duration) ?? -1
-        guard !activity.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, (0...1440).contains(minutes) else {
-            error = "Indique une activité et une durée de 0 à 1 440 minutes."; return
+        guard !activity.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              (0...1440).contains(minutes) else {
+            error = "Indique une activité et une durée de 0 à 1 440 minutes."
+            return
         }
         var logged: [WorkoutExercise] = []
         for exercise in exercises {
@@ -74,14 +139,26 @@ struct NewWorkoutScreen: View {
             if name.isEmpty { continue }
             var sets: [WorkoutSet] = []
             for entry in exercise.sets {
-                guard let reps = Int(entry.reps), reps > 0, reps <= 1000, let weight = parseDouble(entry.weight.isEmpty ? "0" : entry.weight), weight >= 0, weight <= 5000 else {
-                    error = "Vérifie les répétitions et la charge de \(name)."; return
+                guard let reps = Int(entry.reps), reps > 0, reps <= 1000,
+                      let weight = parseDouble(entry.weight.isEmpty ? "0" : entry.weight),
+                      weight.isFinite, weight >= 0, weight <= 5000 else {
+                    error = "Vérifie les répétitions et la charge de \(name)."
+                    return
                 }
-                sets.append(WorkoutSet(reps: reps, weight: weight))
+                sets.append(WorkoutSet(id: entry.id, reps: reps, weight: weight))
             }
-            logged.append(WorkoutExercise(name: name, sets: sets))
+            logged.append(WorkoutExercise(id: exercise.id, name: name, sets: sets))
         }
-        journal.add(WorkoutSession(date: date, activity: activity, durationMinutes: minutes, notes: notes, rpe: rpe == 0 ? nil : rpe, exercises: logged))
+        let session = WorkoutSession(
+            id: editingSession?.id ?? UUID(),
+            date: date, activity: activity, durationMinutes: minutes,
+            notes: notes, rpe: rpe == 0 ? nil : rpe, exercises: logged
+        )
+        if editingSession == nil {
+            journal.add(session)
+        } else {
+            journal.updateWorkout(session)
+        }
         dismiss()
     }
 }

@@ -21,11 +21,50 @@ final class BiluxStore: ObservableObject {
             try encoded.write(to: url, options: [.atomic, .completeFileProtection])
         } catch { feedback = "Impossible d'enregistrer le journal : \(error.localizedDescription)" }
     }
-    func add(_ session: WorkoutSession) { data.workouts.insert(session, at: 0); save() }
+    func add(_ session: WorkoutSession) {
+        data.workouts.insert(session, at: 0)
+        for exercise in session.exercises { registerExerciseName(exercise.name, saveImmediately: false) }
+        save()
+    }
     func add(_ meal: ManualMeal) { data.meals.insert(meal, at: 0); save() }
     func add(_ checkin: Checkin) { data.checkins.insert(checkin, at: 0); save() }
     func add(_ lab: ThyroidLab) { data.labs.insert(lab, at: 0); save() }
     func removeWorkout(_ id: UUID) { data.workouts.removeAll { $0.id == id }; save() }
+    // Actualise la séance en conservant son identifiant et donc ses XP existants.
+    func updateWorkout(_ session: WorkoutSession) {
+        guard let index = data.workouts.firstIndex(where: { $0.id == session.id }) else {
+            feedback = "Cette séance n'existe plus dans le journal."
+            return
+        }
+        data.workouts[index] = session
+        for exercise in session.exercises { registerExerciseName(exercise.name, saveImmediately: false) }
+        save()
+    }
+
+    // Catalogue cumulatif : les noms déjà utilisés restent disponibles, même si
+    // l'utilisateur modifie ensuite une séance ou supprime une ancienne entrée.
+    var exerciseNames: [String] {
+        var names: [String] = []
+        let existing = (data.exerciseLibrary ?? []) + data.workouts.flatMap { $0.exercises.map(\.name) }
+        for value in existing {
+            let name = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { continue }
+            if !names.contains(where: { Self.sameExerciseName($0, name) }) { names.append(name) }
+        }
+        return names.sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
+    private static func sameExerciseName(_ a: String, _ b: String) -> Bool {
+        a.compare(b, options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "fr_FR")) == .orderedSame
+    }
+
+    func registerExerciseName(_ raw: String, saveImmediately: Bool = true) {
+        let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, !exerciseNames.contains(where: { Self.sameExerciseName($0, name) }) else { return }
+        if data.exerciseLibrary == nil { data.exerciseLibrary = [] }
+        data.exerciseLibrary?.append(name)
+        if saveImmediately { save() }
+    }
     var totalXP: Int {
         let workoutXP = data.workouts.count * 25
         let mealDays = Set(data.meals.map { Calendar.current.startOfDay(for: $0.date) }).count * 8

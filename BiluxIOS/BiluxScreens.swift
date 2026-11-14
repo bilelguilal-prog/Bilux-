@@ -188,6 +188,7 @@ private func unit(_ x: Double?, _ suffix: String, decimals: Int = 0) -> String {
 struct SportScreen: View {
     @EnvironmentObject private var journal: BiluxStore
     @State private var showNew = false
+    @State private var editingWorkout: WorkoutSession?
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -216,8 +217,14 @@ struct SportScreen: View {
                             }
                             if let rpe = workout.rpe { Text("Effort perçu : \(rpe)/10").font(.caption) }
                             if !workout.notes.isEmpty { Text(workout.notes).font(.caption) }
-                            Button(role: .destructive) { journal.removeWorkout(workout.id) } label: {
-                                Label("Supprimer", systemImage: "trash").font(.caption)
+                            HStack(spacing: 16) {
+                                Button { editingWorkout = workout } label: {
+                                    Label("Modifier", systemImage: "pencil").font(.caption)
+                                }
+                                .tint(Nuclear.gold)
+                                Button(role: .destructive) { journal.removeWorkout(workout.id) } label: {
+                                    Label("Supprimer", systemImage: "trash").font(.caption)
+                                }
                             }
                         }
                     }
@@ -225,6 +232,7 @@ struct SportScreen: View {
             }
             .navigationTitle("Entraînement").modifier(PageBackground())
             .sheet(isPresented: $showNew) { NewWorkoutScreen() }
+            .sheet(item: $editingWorkout) { workout in NewWorkoutScreen(session: workout) }
         }
     }
 }

@@ -58,6 +58,8 @@ struct BiluxData: Codable {
     var labs: [ThyroidLab] = []
     var caloriesGoal: Int? = nil
     var heroName: String = "BILUX"
+    // Optional pour que les sauvegardes V4, dépourvues de ce champ, restent lisibles.
+    var exerciseLibrary: [String]? = nil
 }
 
 enum BiluxFormat {
