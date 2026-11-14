@@ -10,7 +10,7 @@ private struct ReactorCard<Content: View>: View {
     let content: Content
     init(@ViewBuilder content: () -> Content) { self.content = content() }
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) { content() }
+VStack(alignment: .leading, spacing: 6) { content }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(10)
             .background(ReactorTheme.panel, in: RoundedRectangle(cornerRadius: 13))
@@ -36,11 +36,11 @@ struct WatchRootView: View {
         )
         .tint(ReactorTheme.gold)
         .task { bridge.refresh() }
-    }
+    
 
     private var commandPage: some View {
         ScrollView {
-            VStack(spacing: 8) {
+            VStack(spacing: 8) 
                 Image(systemName: "bolt.shield.fill")
                     .font(.system(size: 25)).foregroundStyle(ReactorTheme.gold)
                     .shadow(color: ReactorTheme.purple, radius: 10)
