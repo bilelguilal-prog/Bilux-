@@ -50,8 +50,11 @@ workflows:
     environment:
       xcode: latest
       ios_signing:
-        distribution_type: app_store
-        bundle_identifier: com.bilux.nuclearascension # Adapter si besoin, egalement dans le .xcodeproj
+        certificates:
+          - BILUX-Distribution
+        provisioning_profiles:
+          - BILUX-AppStore
+          - bilux_watch_appstore
     scripts:
       # Le projet contient maintenant DEUX identifiants à signer :
       # com.bilux.nuclearascension et com.bilux.nuclearascension.watchkitapp.
