@@ -61,7 +61,7 @@ workflows:
       # Créer/autoriser l'identifiant watchOS dans Apple Developer et laisser
       # Codemagic récupérer un profil de distribution pour chaque cible.
       - name: Appliquer les profils Apple (iPhone et Watch)
-        script: xcode-project use-profiles --project BiluxIOS.xcodeproj
+        script: xcode-project use-profiles --project BiluxIOS.xcodeproj --archive-method=app-store --code-signing-setup-verbose-logging
       - name: Construire la version TestFlight
         script: |
           xcode-project build-ipa \
@@ -76,4 +76,3 @@ workflows:
         auth: integration
         submit_to_testflight: false
         submit_to_app_store: false
-
