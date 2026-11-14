@@ -30,6 +30,16 @@ private struct NuclearStage: Identifiable {
         .init(id: 4, name: "ASCENSION", minLevel: 15, subtitle: "Au-delà des limites", symbol: "crown.fill", accent: Nuclear.paleGold)
     ]
 
+    var artwork: String {
+        switch id {
+        case 0: return "BiluxFormSurvivant"
+        case 1: return "BiluxHero" // Illustration V5.1 originale, conservee intacte.
+        case 2: return "BiluxFormReacteur"
+        case 3: return "BiluxFormNucleaire"
+        default: return "BiluxFormAscension"
+        }
+    }
+
     static func current(level: Int) -> NuclearStage {
         all.last(where: { level >= $0.minLevel }) ?? all[0]
     }
@@ -98,56 +108,73 @@ private enum NuclearProgress {
     }
 }
 
+// V5.3: vrais portraits par palier, sans effet sur les XP ni les donnees de sante.
 private struct NuclearHeroAura: View {
     let level: Int
     let effectsEnabled: Bool
+    let stageOverride: NuclearStage?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var energized = false
 
-    private var stage: NuclearStage { NuclearStage.current(level: level) }
-    private var animate: Bool { effectsEnabled && !reduceMotion }
+    init(level: Int, effectsEnabled: Bool, stageOverride: NuclearStage? = nil) {
+        self.level = level
+        self.effectsEnabled = effectsEnabled
+        self.stageOverride = stageOverride
+    }
+
+    private var stage: NuclearStage { stageOverride ?? NuclearStage.current(level: level) }
+    private var lockedPreview: Bool { stageOverride != nil && stage.minLevel > level }
+    private var animate: Bool { effectsEnabled && !reduceMotion && !lockedPreview }
 
     var body: some View {
-        ZStack {
-            Image("BiluxHero")
-                .resizable().scaledToFill()
-                .overlay {
-                    LinearGradient(colors: [stage.accent.opacity(0.03), Nuclear.purple.opacity(Double(stage.id) * 0.06), .clear],
-                                   startPoint: .topTrailing, endPoint: .bottomLeading)
+        GeometryReader { container in
+            ZStack {
+                Image(stage.artwork)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: container.size.width, height: container.size.height)
+                    .saturation(lockedPreview ? 0.17 : 1)
+                    .overlay {
+                        LinearGradient(colors: [stage.accent.opacity(0.02), Nuclear.purple.opacity(0.08 + Double(stage.id) * 0.02), .clear],
+                                       startPoint: .topTrailing, endPoint: .bottomLeading)
+                        .blendMode(.screen)
+                    }
+                    .clipped()
+                RadialGradient(colors: [stage.accent.opacity(animate ? 0.26 : 0.12), .clear],
+                               center: .center, startRadius: 20, endRadius: 260)
                     .blendMode(.screen)
-                }
-                .clipped()
-            RadialGradient(colors: [stage.accent.opacity(0.07 + Double(stage.id) * 0.03), .clear],
-                           center: .center, startRadius: 40, endRadius: 230)
-                .blendMode(.screen)
-            Circle().trim(from: 0.06, to: 0.82)
-                .stroke(AngularGradient(colors: [.clear, stage.accent.opacity(0.75), Nuclear.purple, .clear], center: .center),
-                        style: StrokeStyle(lineWidth: 2.4, lineCap: .round))
-                .frame(width: 225, height: 225)
-                .rotationEffect(.degrees(energized && animate ? 26 : -12))
-                .opacity(stage.id > 0 ? 0.67 : 0.20)
-                .blendMode(.screen)
-            VStack {
-                HStack {
-                    Image(systemName: stage.symbol)
-                        .foregroundStyle(stage.accent)
-                        .font(.system(size: 20, weight: .bold))
-                        .padding(12)
-                        .background(.black.opacity(0.58), in: Circle())
+                    .scaleEffect(energized && animate ? 1.15 : 0.92)
+                Circle().trim(from: 0.03, to: 0.79)
+                    .stroke(AngularGradient(colors: [.clear, stage.accent.opacity(0.86), Nuclear.purple, .clear], center: .center),
+                            style: StrokeStyle(lineWidth: stage.id >= 3 ? 3.2 : 2.1, lineCap: .round))
+                    .frame(width: min(container.size.width * 0.64, 235), height: min(container.size.width * 0.64, 235))
+                    .rotationEffect(.degrees(energized && animate ? 24 : -12))
+                    .opacity(lockedPreview ? 0.32 : 0.75)
+                    .blendMode(.screen)
+                VStack {
+                    HStack(spacing: 8) {
+                        Image(systemName: lockedPreview ? "lock.fill" : stage.symbol)
+                            .font(.system(size: 17, weight: .bold))
+                            .foregroundStyle(stage.accent)
+                            .padding(10)
+                            .background(.black.opacity(0.68), in: Circle())
+                        Spacer()
+                        Text(lockedPreview ? "APERÇU · NIV. \(stage.minLevel)" : "RANG " + stage.name)
+                            .font(.system(size: 10, weight: .black, design: .rounded))
+                            .tracking(1.0)
+                            .foregroundStyle(stage.accent)
+                            .padding(.horizontal, 12).padding(.vertical, 8)
+                            .background(.black.opacity(0.72), in: Capsule())
+                    }
                     Spacer()
-                    Text(stage.name)
-                        .font(.system(size: 11, weight: .black, design: .rounded))
-                        .tracking(1.4)
-                        .padding(.horizontal, 12).padding(.vertical, 8)
-                        .background(.black.opacity(0.70), in: Capsule())
-                        .foregroundStyle(stage.accent)
-                }
-                Spacer()
-            }.padding(18)
+                }.padding(12)
+            }
+            .frame(width: container.size.width, height: container.size.height)
+            .clipped()
         }
         .onAppear { energized = true }
-        .animation(animate ? .easeInOut(duration: 3.4).repeatForever(autoreverses: true) : .none, value: energized)
-        .accessibilityLabel("Avatar BILUX, transformation " + stage.name)
+        .animation(animate ? .easeInOut(duration: 3).repeatForever(autoreverses: true) : .none, value: energized)
+        .accessibilityLabel("Avatar BILUX : " + stage.name + (lockedPreview ? ", verrouille" : ", debloque"))
     }
 }
 
@@ -178,38 +205,179 @@ private struct NuclearSkillRow: View {
     }
 }
 
+// Chaque noeud est un jalon calcule depuis les vraies saisies. Aucun point n'est debite.
+private struct NuclearMasteryNode: Identifiable {
+    let id: String
+    let name: String
+    let detail: String
+    let icon: String
+    let threshold: Int
+    let progress: Int
+    var unlocked: Bool { progress >= threshold }
+}
+
+private struct NuclearMasteryPath: Identifiable {
+    let id: String
+    let icon: String
+    let accent: Color
+    let nodes: [NuclearMasteryNode]
+}
+
+private struct NuclearMasteryTree: View {
+    let data: BiluxData
+    @State private var selectedNode: NuclearMasteryNode?
+
+    private var paths: [NuclearMasteryPath] {
+        let sessions = data.workouts.count
+        let sets = NuclearProgress.numberOfSets(data)
+        let exercises = NuclearProgress.uniqueExercises(data)
+        let days = NuclearProgress.recordedDays(data)
+        return [
+            .init(id: "DISCIPLINE", icon: "dumbbell.fill", accent: Nuclear.gold, nodes: [
+                .init(id: "d1", name: "Premier pas", detail: "Enregistrer une premiere seance.", icon: "figure.walk", threshold: 1, progress: sessions),
+                .init(id: "d2", name: "Forge", detail: "Atteindre 5 seances consignees.", icon: "dumbbell.fill", threshold: 5, progress: sessions),
+                .init(id: "d3", name: "Tenacite", detail: "Atteindre 10 seances, sans exigence de regularite quotidienne.", icon: "shield.fill", threshold: 10, progress: sessions)
+            ]),
+            .init(id: "PUISSANCE", icon: "bolt.fill", accent: .orange, nodes: [
+                .init(id: "p1", name: "Etincelle", detail: "Enregistrer 10 series.", icon: "bolt.fill", threshold: 10, progress: sets),
+                .init(id: "p2", name: "Charge", detail: "Enregistrer 50 series, avec ou sans poids.", icon: "flame.fill", threshold: 50, progress: sets),
+                .init(id: "p3", name: "Reveil", detail: "Enregistrer 100 series.", icon: "atom", threshold: 100, progress: sets)
+            ]),
+            .init(id: "EXPLORATION", icon: "safari.fill", accent: .cyan, nodes: [
+                .init(id: "e1", name: "Curieux", detail: "Essayer 2 exercices differents.", icon: "sparkles", threshold: 2, progress: exercises),
+                .init(id: "e2", name: "Eclaireur", detail: "Essayer 5 exercices differents.", icon: "safari.fill", threshold: 5, progress: exercises),
+                .init(id: "e3", name: "Voyageur", detail: "Essayer 20 exercices differents.", icon: "globe.europe.africa.fill", threshold: 20, progress: exercises)
+            ]),
+            .init(id: "CHRONIQUES", icon: "book.closed.fill", accent: Nuclear.purple, nodes: [
+                .init(id: "c1", name: "Memoire", detail: "Consigner 2 jours de suivi.", icon: "book.fill", threshold: 2, progress: days),
+                .init(id: "c2", name: "Journal", detail: "Consigner 5 jours de suivi.", icon: "calendar", threshold: 5, progress: days),
+                .init(id: "c3", name: "Chroniqueur", detail: "Consigner 14 jours, non consecutifs.", icon: "checkmark.seal.fill", threshold: 14, progress: days)
+            ])
+        ]
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 17) {
+            ForEach(paths) { path in
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Image(systemName: path.icon).foregroundStyle(path.accent)
+                        Text(path.id).font(.caption.bold()).tracking(1).foregroundStyle(.white)
+                        Spacer()
+                        Text("\(path.nodes.filter(\.unlocked).count)/3")
+                            .font(.caption.monospacedDigit()).foregroundStyle(Nuclear.paleGold)
+                    }
+                    HStack(alignment: .center, spacing: 0) {
+                        ForEach(0..<path.nodes.count, id: \.self) { index in
+                            let node = path.nodes[index]
+                            Button { selectedNode = node } label: {
+                                VStack(spacing: 6) {
+                                    Image(systemName: node.unlocked ? node.icon : "lock.fill")
+                                        .font(.system(size: 18, weight: .semibold))
+                                        .frame(height: 25)
+                                        .foregroundStyle(node.unlocked ? path.accent : Nuclear.muted)
+                                    Text(node.name).font(.system(size: 9, weight: .bold))
+                                        .lineLimit(1).minimumScaleFactor(0.65)
+                                        .foregroundStyle(node.unlocked ? .white : Nuclear.muted)
+                                    Text("\(min(node.progress, node.threshold))/\(node.threshold)")
+                                        .font(.system(size: 9, design: .monospaced))
+                                        .foregroundStyle(Nuclear.muted)
+                                }
+                                .frame(maxWidth: .infinity).frame(height: 84)
+                                .background(node.unlocked ? path.accent.opacity(0.16) : Nuclear.background.opacity(0.62),
+                                            in: RoundedRectangle(cornerRadius: 12))
+                                .overlay(RoundedRectangle(cornerRadius: 12)
+                                    .stroke(node.unlocked ? path.accent.opacity(0.8) : Nuclear.muted.opacity(0.30), lineWidth: 1))
+                            }.buttonStyle(.plain)
+                                .accessibilityLabel("\(node.name) : \(node.unlocked ? "debloque" : "verrouille") ; \(node.progress) sur \(node.threshold)")
+                            if index < path.nodes.count - 1 {
+                                Rectangle().fill(path.nodes[index + 1].unlocked ? path.accent : Nuclear.muted.opacity(0.25))
+                                    .frame(width: 12, height: 2)
+                            }
+                        }
+                    }
+                }
+            }
+            Text("Touchez un noeud pour ses conditions. Ces recompenses sont symboliques : aucun bonus de force ou de sante n'est cree.")
+                .font(.caption2).foregroundStyle(Nuclear.muted)
+        }
+        .sheet(item: $selectedNode) { node in
+            NavigationStack {
+                ZStack {
+                    Nuclear.background.ignoresSafeArea()
+                    VStack(spacing: 17) {
+                        Image(systemName: node.unlocked ? node.icon : "lock.fill")
+                            .font(.system(size: 58)).foregroundStyle(Nuclear.gold)
+                            .padding(20)
+                            .background(Nuclear.panel, in: Circle())
+                        Text(node.name.uppercased()).font(.title2.bold()).foregroundStyle(.white)
+                        Text(node.detail).multilineTextAlignment(.center).foregroundStyle(Nuclear.muted)
+                        Text("\(min(node.progress, node.threshold)) / \(node.threshold)")
+                            .font(.title3.monospacedDigit().bold()).foregroundStyle(Nuclear.gold)
+                        Text(node.unlocked ? "TROPHEE DE MAITRISE ACQUIS" : "NOEUD A DEBLOQUER")
+                            .font(.caption.bold()).foregroundStyle(.white)
+                        Spacer()
+                    }.padding(24).padding(.top, 24)
+                }
+                .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fermer") { selectedNode = nil } } }
+            }
+            .presentationDetents([.medium])
+        }
+    }
+}
+
 private struct NuclearLevelUp: View {
     let level: Int
     let onDismiss: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var revealed = false
 
+    private var stage: NuclearStage { NuclearStage.current(level: level) }
+    private var newForm: Bool { stage.minLevel == level }
+
     var body: some View {
         ZStack {
-            Nuclear.background.opacity(0.96).ignoresSafeArea()
-            RadialGradient(colors: [Nuclear.purple.opacity(0.42), .clear], center: .center, startRadius: 20, endRadius: 330)
-                .ignoresSafeArea()
-            VStack(spacing: 20) {
-                Image(systemName: "crown.fill")
-                    .font(.system(size: 64, weight: .black))
-                    .foregroundStyle(Nuclear.gold)
-                    .scaleEffect(revealed ? 1.0 : 0.7)
-                Text("NIVEAU SUPÉRIEUR")
-                    .font(.caption.bold()).tracking(3).foregroundStyle(Nuclear.paleGold)
-                Text("\(level)")
-                    .font(.system(size: 100, weight: .black, design: .rounded))
-                    .foregroundStyle(.white)
-                Text("RANG : " + NuclearStage.current(level: level).name)
-                    .font(.title3.bold()).foregroundStyle(Nuclear.gold)
-                Text("Ta progression est enregistrée.")
-                    .foregroundStyle(Nuclear.muted)
-                Button("CONTINUER L'ASCENSION", action: onDismiss)
-                    .buttonStyle(.borderedProminent).tint(Nuclear.gold)
-                    .padding(.top, 20)
+            Nuclear.background.ignoresSafeArea()
+            GeometryReader { size in
+                Image(stage.artwork).resizable().scaledToFill()
+                    .frame(width: size.size.width, height: size.size.height)
+                    .clipped().ignoresSafeArea()
             }
-            .padding(28)
+            LinearGradient(colors: [Nuclear.background.opacity(0.35), Nuclear.background.opacity(0.55), Nuclear.background],
+                           startPoint: .top, endPoint: .bottom).ignoresSafeArea()
+            RadialGradient(colors: [stage.accent.opacity(revealed ? 0.35 : 0.12), .clear],
+                           center: .center, startRadius: 20, endRadius: 320).ignoresSafeArea()
+            VStack(spacing: 17) {
+                Spacer()
+                Image(systemName: stage.symbol)
+                    .font(.system(size: 56, weight: .black))
+                    .foregroundStyle(stage.accent)
+                    .shadow(color: stage.accent.opacity(0.7), radius: 17)
+                    .scaleEffect(revealed ? 1 : 0.65)
+                Text(newForm ? "TRANSFORMATION DÉBLOQUÉE" : "NIVEAU SUPÉRIEUR")
+                    .font(.system(size: 12, weight: .black)).tracking(2)
+                    .foregroundStyle(Nuclear.paleGold)
+                Text("\(level)")
+                    .font(.system(size: 102, weight: .black, design: .rounded))
+                    .foregroundStyle(.white)
+                    .shadow(color: Nuclear.gold.opacity(0.7), radius: 17)
+                Text("RANG " + stage.name)
+                    .font(.title2.bold()).foregroundStyle(stage.accent)
+                Text(newForm ? "Une nouvelle apparence est disponible dans Ascension." : "Une étape de plus dans ton ascension personnelle.")
+                    .font(.subheadline).multilineTextAlignment(.center).foregroundStyle(.white)
+                Button(action: onDismiss) {
+                    Text("CONTINUER L'ASCENSION")
+                        .font(.headline.bold()).frame(maxWidth: .infinity)
+                        .padding(.vertical, 8)
+                }
+                .buttonStyle(.borderedProminent).tint(Nuclear.gold)
+                .padding(.top, 24)
+                Spacer().frame(height: 45)
+            }.padding(27)
         }
-        .onAppear { withAnimation(reduceMotion ? nil : .spring(response: 0.6, dampingFraction: 0.65)) { revealed = true } }
+        .onAppear {
+            withAnimation(reduceMotion ? nil : .spring(response: 0.65, dampingFraction: 0.66)) { revealed = true }
+        }
     }
 }
 
@@ -357,7 +525,13 @@ struct HomeScreen: View {
     @AppStorage("bilux.effectsEnabled") private var effectsEnabled = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AppStorage("bilux.lastCelebratedLevel") private var lastCelebratedLevel = 0
+    @AppStorage("bilux.equippedTransformationID") private var equippedTransformationID = -1
     @State private var showLevelUp = false
+
+    private var homeStage: NuclearStage {
+        NuclearStage.all.first(where: { $0.id == equippedTransformationID && $0.minLevel <= journal.heroLevel })
+            ?? NuclearStage.current(level: journal.heroLevel)
+    }
 
     var body: some View {
         NavigationStack {
@@ -456,7 +630,7 @@ struct HomeScreen: View {
     private var heroPanel: some View {
         ZStack(alignment: .bottomLeading) {
             GeometryReader { geometry in
-                NuclearHeroAura(level: journal.heroLevel, effectsEnabled: effectsEnabled)
+                NuclearHeroAura(level: journal.heroLevel, effectsEnabled: effectsEnabled, stageOverride: homeStage)
                     .frame(width: geometry.size.width, height: geometry.size.height)
                     .clipped()
             }
@@ -771,13 +945,14 @@ struct AscensionScreen: View {
     @State private var showingImporter = false
     @State private var exportFile: URL?
     @AppStorage("bilux.effectsEnabled") private var effectsEnabled = true
+    @AppStorage("bilux.equippedTransformationID") private var equippedTransformationID = -1
     @State private var selectedStage = 0
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 15) {
                     GeometryReader { geometry in
-                        NuclearHeroAura(level: journal.heroLevel, effectsEnabled: effectsEnabled)
+                        NuclearHeroAura(level: journal.heroLevel, effectsEnabled: effectsEnabled, stageOverride: NuclearStage.all[selectedStage])
                             .frame(width: geometry.size.width, height: geometry.size.height)
                             .clipped()
                     }
@@ -811,7 +986,7 @@ struct AscensionScreen: View {
                             .font(.caption).foregroundStyle(Nuclear.muted)
                     }
                     SectionCaption(title: "Les cinq transformations")
-                    Text("Les formes se débloquent automatiquement avec tes XP. L'image conserve ton avatar actuel ; son aura et son emblème évoluent.")
+                    Text("Chaque rang a désormais un portrait différent. Une forme déverrouillée peut être équipée ; les rangs futurs restent en aperçu.")
                         .font(.caption).foregroundStyle(Nuclear.muted)
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 10) {
@@ -846,19 +1021,25 @@ struct AscensionScreen: View {
                              ? "Transformation acquise · niveau \(stage.minLevel)"
                              : "Encore verrouillée · disponible au niveau \(stage.minLevel)")
                             .font(.caption).foregroundStyle(Nuclear.muted)
+                        if journal.heroLevel >= stage.minLevel {
+                            Button {
+                                equippedTransformationID = stage.id
+                            } label: {
+                                Label(equippedTransformationID == stage.id || (equippedTransformationID == -1 && NuclearStage.current(level: journal.heroLevel).id == stage.id)
+                                      ? "FORME ACTIVE" : "ÉQUIPER CETTE FORME",
+                                      systemImage: "bolt.shield.fill")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.borderedProminent).tint(stage.accent)
+                            .disabled(equippedTransformationID == stage.id)
+                        } else {
+                            Label("Déblocage automatique au niveau \(stage.minLevel)", systemImage: "lock.fill")
+                                .font(.caption).foregroundStyle(Nuclear.muted)
+                        }
                     }
                     SectionCaption(title: "Arbre de maîtrise")
                     NuclearCard {
-                        NuclearSkillRow(title: "Discipline", subtitle: "Séances consignées, sans obligation quotidienne",
-                                        value: journal.data.workouts.count, goal: 10, icon: "dumbbell.fill")
-                        NuclearSkillRow(title: "Puissance", subtitle: "Séries enregistrées, avec ou sans charge",
-                                        value: NuclearProgress.numberOfSets(journal.data), goal: 100, icon: "bolt.fill")
-                        NuclearSkillRow(title: "Exploration", subtitle: "Exercices différents expérimentés",
-                                        value: NuclearProgress.uniqueExercises(journal.data), goal: 20, icon: "figure.strengthtraining.traditional")
-                        NuclearSkillRow(title: "Chroniques", subtitle: "Jours de suivi, non nécessairement consécutifs",
-                                        value: NuclearProgress.recordedDays(journal.data), goal: 14, icon: "book.closed.fill")
-                        Text("Ces voies sont des indicateurs ludiques : elles ne donnent pas de bonus médical ou de performance.")
-                            .font(.caption2).foregroundStyle(Nuclear.muted)
+                        NuclearMasteryTree(data: journal.data)
                     }
                     SectionCaption(title: "Trophées du réacteur")
                     let awards = NuclearProgress.awards(journal.data, level: journal.heroLevel)
@@ -908,7 +1089,10 @@ struct AscensionScreen: View {
                 }.padding(16)
             }
             .navigationTitle("Ascension").modifier(PageBackground())
-            .onAppear { selectedStage = NuclearStage.current(level: journal.heroLevel).id }
+            .onAppear {
+                let unlocked = NuclearStage.all.first(where: { $0.id == equippedTransformationID && $0.minLevel <= journal.heroLevel })
+                selectedStage = (unlocked ?? NuclearStage.current(level: journal.heroLevel)).id
+            }
             .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.json]) { result in
                 switch result {
                 case .success(let url): journal.importJSON(url)
