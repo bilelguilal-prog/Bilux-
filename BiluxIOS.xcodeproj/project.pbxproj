@@ -15,6 +15,7 @@
 		07BAD10632E7FB84639F1390 /* V3Import.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5F3BB468EA1FEC126CE6808 /* V3Import.swift */; };
 		C1778F18E9682FB2E9FDB3F7 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 87F0E30A28F0BC1808C661EE /* Assets.xcassets */; };
 		94808CB405C3496E0077AAD1 /* WatchSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = F17B3F861CEBE2EB2DE42924 /* WatchSnapshot.swift */; };
+		0389A251E22B1B8A84325F58 /* WatchSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = F17B3F861CEBE2EB2DE42924 /* WatchSnapshot.swift */; };
 		E21F3A5C0DD49C47F752AADB /* WatchPhoneBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = C80114C18FE0503E006F8BB3 /* WatchPhoneBridge.swift */; };
 		4B07F44C67C2EA1950939071 /* BiluxWatchApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69131E21378525CC21D29F2C /* BiluxWatchApp.swift */; };
 		C062C6FFA428A2059F609884 /* WatchBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2CBCC0F005E066A52707FE3 /* WatchBridge.swift */; };
@@ -119,7 +120,7 @@
 				A00D5755FDA39BE871E05563 /* Models.swift in Sources */,
 				07BAD10632E7FB84639F1390 /* V3Import.swift in Sources */,
 			); runOnlyForDeploymentPostprocessing = 0; };
-		F3770905F93BD3B934392118 /* Watch Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (4B07F44C67C2EA1950939071, C062C6FFA428A2059F609884, 5C7955D76FE1F5268C27B72B, 58DA93DBA5AF542A9D389E9E, 94808CB405C3496E0077AAD1 /* Snapshot */); runOnlyForDeploymentPostprocessing = 0; };
+		F3770905F93BD3B934392118 /* Watch Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (4B07F44C67C2EA1950939071, C062C6FFA428A2059F609884, 5C7955D76FE1F5268C27B72B, 58DA93DBA5AF542A9D389E9E, 0389A251E22B1B8A84325F58 /* Snapshot */); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
