@@ -85,9 +85,13 @@ final class WatchPhoneBridge: NSObject, WCSessionDelegate {
         guard !journal.data.workouts.contains(where: { $0.id == id }) else { return }
         guard abs(Date().timeIntervalSince1970 - startedAt) < 7 * 86_400 else { return }
         // Séance manuelle : pas d'écriture HealthKit et pas de doublon avec l'app Exercices.
+        // BILUX V5.4 : catégorie validée, repli compatible avec les anciennes Watch.
+        let allowedActivities: Set<String> = ["Musculation", "Marche", "Cardio", "Mobilité"]
+        let requestedActivity = message["activity"] as? String
+        let activity = requestedActivity.flatMap { allowedActivities.contains($0) ? $0 : nil } ?? "Séance Apple Watch"
         journal.add(WorkoutSession(
             id: id, date: Date(timeIntervalSince1970: startedAt),
-            activity: "Séance Apple Watch", durationMinutes: duration,
+            activity: activity, durationMinutes: duration,
             notes: "Chronométrée dans BILUX Watch (sans enregistrement HealthKit)", exercises: []
         ))
     }

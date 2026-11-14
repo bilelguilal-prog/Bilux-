@@ -34,14 +34,14 @@ final class WatchBridge: NSObject, ObservableObject, WCSessionDelegate {
         flushWorkouts()
     }
 
-    func finishWorkout(start: Date, elapsedMinutes: Int) {
+    func finishWorkout(start: Date, elapsedMinutes: Int, activity: String = "Séance Apple Watch") {
         guard elapsedMinutes >= 1 else {
             feedback = "Enregistre au moins une minute."
             return
         }
         let event: [String: Any] = [
             "type": "workoutCompleted", "id": UUID().uuidString,
-            "durationMinutes": min(elapsedMinutes, 240),
+            "durationMinutes": min(elapsedMinutes, 240), "activity": activity,
             "startedAt": start.timeIntervalSince1970
         ]
         guard WCSession.isSupported() else {
