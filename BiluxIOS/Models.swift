@@ -249,9 +249,12 @@ enum BILUXV55Progression {
     static func currentQuestProgress(_ data: BiluxData, now: Date = .now) -> (todayWorkout: Bool, todayMeal: Bool, todayCheckin: Bool, weeklyWorkouts: Int, weeklyMeals: Int, weeklyCheckins: Int, monthlyWorkouts: Int, quarterWorkouts: Int) {
         let since = data.longAscensionAnchor?.startedAt ?? now
         let cal = Calendar.current
-        let workouts = qualifyingWorkoutDays(data, since: since, now: now)
-        let meals = journalDays(data, since: since, now: now, meals: true)
-        let checkins = journalDays(data, since: since, now: now, meals: false)
+        // V5.6 : le tableau de quêtes suit les MÊMES journées plafonnées
+        // que earnedXP. Une 6e journée ne peut pas afficher une victoire
+        // si elle n'a pas généré les XP de boss.
+        let workouts = Set(limitedByWeek(qualifyingWorkoutDays(data, since: since, now: now), maxDays: 5, calendar: cal))
+        let meals = Set(limitedByWeek(journalDays(data, since: since, now: now, meals: true), maxDays: 5, calendar: cal))
+        let checkins = Set(limitedByWeek(journalDays(data, since: since, now: now, meals: false), maxDays: 5, calendar: cal))
         let today = cal.startOfDay(for: now)
         return (workouts.contains(today), meals.contains(today), checkins.contains(today),
                 countThisWeek(workouts, now: now), countThisWeek(meals, now: now),

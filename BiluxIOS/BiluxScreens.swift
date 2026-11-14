@@ -1248,45 +1248,7 @@ private struct LongAscensionQuestBoard: View {
                     icon: "book.closed.fill", current: quests.weeklyCheckins, target: 3,
                     xp: BILUXV55Progression.weeklyJournalXP, tint: Nuclear.purple)
             }
-            SectionCaption(title: "Boss mensuel")
-            NuclearCard {
-                HStack(spacing: 12) {
-                    Image(systemName: "shield.lefthalf.filled")
-                        .font(.system(size: 30)).foregroundStyle(Nuclear.gold)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("LE GARDIEN DU RÉACTEUR")
-                            .font(.subheadline.bold()).foregroundStyle(.white)
-                        Text("12 journées de séance ce mois-ci, à ton rythme.")
-                            .font(.caption2).foregroundStyle(Nuclear.muted)
-                    }
-                }
-                ProgressView(value: Double(min(quests.monthlyWorkouts, 12)) / 12.0)
-                    .tint(Nuclear.purple)
-                HStack {
-                    Text("\(min(quests.monthlyWorkouts, 12)) / 12 journées")
-                    Spacer()
-                    Text(quests.monthlyWorkouts >= 12 ? "BOSS VAINCU" : "+140 XP")
-                }.font(.caption.bold()).foregroundStyle(Nuclear.paleGold)
-            }
-            SectionCaption(title: "Épreuve légendaire · Trimestre")
-            NuclearCard {
-                HStack(spacing: 12) {
-                    Image(systemName: "crown.fill")
-                        .font(.system(size: 30)).foregroundStyle(Nuclear.paleGold)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("LE SOUVERAIN DU NÉANT")
-                            .font(.subheadline.bold()).foregroundStyle(.white)
-                        Text("30 journées de séance en trois mois. À ton rythme, repos inclus.")
-                            .font(.caption2).foregroundStyle(Nuclear.muted)
-                    }
-                }
-                ProgressView(value: Double(min(quests.quarterWorkouts, 30)) / 30.0).tint(Nuclear.gold)
-                HStack {
-                    Text("\(min(quests.quarterWorkouts, 30)) / 30 journées")
-                    Spacer()
-                    Text(quests.quarterWorkouts >= 30 ? "LÉGENDE VAINCUE" : "+180 XP")
-                }.font(.caption.bold()).foregroundStyle(Nuclear.paleGold)
-            }
+            BILUXV56BossArena()
             if journal.heroLevel >= 100 {
                 NuclearCard {
                     Label("MAÎTRISE ULTIME · NIVEAU 100", systemImage: "crown.fill")
@@ -1297,6 +1259,250 @@ private struct LongAscensionQuestBoard: View {
             }
             Text("Progression permanente. Aucune série obligatoire, aucun malus en repos, aucune XP sur les résultats médicaux. Les quêtes sont validées depuis le journal, une fois par période.")
                 .font(.caption2).foregroundStyle(Nuclear.muted)
+        }
+    }
+}
+
+// MARK: - BILUX V5.6 · L'ARÈNE DES GARDIENS
+// Combat symbolique uniquement : le journal V5.5 reste l'unique source des XP.
+private enum BILUXV56Boss: String, Identifiable, CaseIterable {
+    case guardian
+    case sovereign
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .guardian: return "LE GARDIEN DU RÉACTEUR"
+        case .sovereign: return "LE SOUVERAIN DU NÉANT"
+        }
+    }
+    var subtitle: String {
+        switch self {
+        case .guardian: return "Sentinelle du noyau · Boss mensuel"
+        case .sovereign: return "Maître des ombres · Boss légendaire"
+        }
+    }
+    var legend: String {
+        switch self {
+        case .guardian: return "Chaque journée de séance fissure l'armure du gardien. Aucun combat n'est perdu pendant tes jours de repos."
+        case .sovereign: return "Une épreuve de trois mois : le souverain cède devant la constance, pas devant la précipitation."
+        }
+    }
+    var victoryText: String {
+        switch self {
+        case .guardian: return "LE CŒUR DU RÉACTEUR EST LIBÉRÉ"
+        case .sovereign: return "LE NÉANT RECONNAÎT TON ASCENSION"
+        }
+    }
+    var period: String {
+        switch self {
+        case .guardian: return "Mois civil en cours"
+        case .sovereign: return "Trimestre civil en cours"
+        }
+    }
+    var target: Int { self == .guardian ? 12 : 30 }
+    var reward: Int { self == .guardian ? BILUXV55Progression.monthlyBossXP : BILUXV55Progression.legendaryBossXP }
+    var symbol: String { self == .guardian ? "shield.lefthalf.filled" : "crown.fill" }
+    var accent: Color { self == .guardian ? Nuclear.purple : Nuclear.gold }
+
+    func countedDays(in data: BiluxData) -> Int {
+        let progress = BILUXV55Progression.currentQuestProgress(data)
+        return self == .guardian ? progress.monthlyWorkouts : progress.quarterWorkouts
+    }
+    func phase(for count: Int) -> String {
+        if count >= target { return "BOSS VAINCU" }
+        let percent = Double(count) / Double(target)
+        if percent >= 0.75 { return "PHASE IV · DERNIÈRE RÉSISTANCE" }
+        if percent >= 0.50 { return "PHASE III · ARMURE BRISÉE" }
+        if percent >= 0.25 { return "PHASE II · NOYAU EXPOSÉ" }
+        return "PHASE I · ÉVEIL DU BOSS"
+    }
+}
+
+private struct BILUXV56BossArena: View {
+    @EnvironmentObject private var journal: BiluxStore
+    @State private var selectedBoss: BILUXV56Boss?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionCaption(title: "Arène des gardiens")
+            ForEach(BILUXV56Boss.allCases) { boss in
+                let count = boss.countedDays(in: journal.data)
+                let defeated = count >= boss.target
+                Button { selectedBoss = boss } label: {
+                    NuclearCard {
+                        HStack(alignment: .center, spacing: 12) {
+                            ZStack {
+                                Circle().fill(boss.accent.opacity(0.15))
+                                Image(systemName: defeated ? "checkmark.shield.fill" : boss.symbol)
+                                    .font(.system(size: 31, weight: .semibold))
+                                    .foregroundStyle(boss.accent)
+                            }.frame(width: 66, height: 66)
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text(boss.subtitle.uppercased())
+                                    .font(.system(size: 9, weight: .heavy)).tracking(1)
+                                    .foregroundStyle(boss.accent)
+                                Text(boss.title)
+                                    .font(.subheadline.bold()).foregroundStyle(.white)
+                                    .multilineTextAlignment(.leading)
+                                Text(boss.phase(for: count))
+                                    .font(.caption2.bold())
+                                    .foregroundStyle(defeated ? Color.green : Nuclear.muted)
+                            }
+                            Spacer(minLength: 0)
+                            Image(systemName: "chevron.right")
+                                .font(.caption.bold()).foregroundStyle(Nuclear.muted)
+                        }
+                        ProgressView(value: Double(min(count, boss.target)), total: Double(boss.target))
+                            .tint(boss.accent)
+                        HStack {
+                            Text("\(min(count, boss.target)) / \(boss.target) journées")
+                            Spacer()
+                            Text(defeated ? "+\(boss.reward) XP · ACQUIS" : "+\(boss.reward) XP")
+                        }
+                        .font(.caption2.monospacedDigit().bold())
+                        .foregroundStyle(Nuclear.paleGold)
+                        Label("ENTRER DANS L'ARÈNE", systemImage: "bolt.shield.fill")
+                            .font(.system(size: 10, weight: .heavy)).tracking(1)
+                            .foregroundStyle(boss.accent)
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(boss.title), \(min(count, boss.target)) journées sur \(boss.target), \(boss.phase(for: count)). Ouvrir l'arène.")
+            }
+            Text("Dégâts et victoires calculés depuis les séances de 10 min ou plus : 1 journée par jour, maximum 5 par semaine. Les XP sont attribués automatiquement, une seule fois par période.")
+                .font(.caption2).foregroundStyle(Nuclear.muted)
+        }
+        .sheet(item: $selectedBoss) { boss in
+            NavigationStack {
+                BILUXV56BossBattle(boss: boss)
+                    .environmentObject(journal)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Fermer") { selectedBoss = nil }
+                        }
+                    }
+            }
+            .presentationDragIndicator(.visible)
+        }
+    }
+}
+
+private struct BILUXV56BossBattle: View {
+    let boss: BILUXV56Boss
+    @EnvironmentObject private var journal: BiluxStore
+    @AppStorage("bilux.effectsEnabled") private var effectsEnabled = true
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var charged = false
+    @State private var revealed = false
+
+    private var count: Int { boss.countedDays(in: journal.data) }
+    private var defeated: Bool { count >= boss.target }
+    private var percent: Double { Double(min(count, boss.target)) / Double(boss.target) }
+    private var remaining: Int { max(0, boss.target - count) }
+    private var canAnimate: Bool { effectsEnabled && !reduceMotion }
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 18) {
+                Text("DOSSIER DE COMBAT · BILUX V5.6")
+                    .font(.system(size: 10, weight: .black, design: .rounded))
+                    .tracking(2).foregroundStyle(Nuclear.paleGold)
+                    .padding(.top, 8)
+                Text(boss.title)
+                    .font(.system(.title2, design: .rounded).weight(.heavy))
+                    .multilineTextAlignment(.center).foregroundStyle(.white)
+
+                ZStack {
+                    RoundedRectangle(cornerRadius: 24)
+                        .fill(LinearGradient(colors: [boss.accent.opacity(0.17), Nuclear.panel, Nuclear.background],
+                                             startPoint: .topLeading, endPoint: .bottomTrailing))
+                    RadialGradient(colors: [boss.accent.opacity(charged ? 0.34 : 0.16), .clear],
+                                   center: .center, startRadius: 18, endRadius: 180)
+                        .clipShape(RoundedRectangle(cornerRadius: 24))
+                    Circle()
+                        .stroke(boss.accent.opacity(0.32), lineWidth: 1)
+                        .frame(width: 188, height: 188)
+                    Circle()
+                        .trim(from: 0.04, to: 0.74)
+                        .stroke(boss.accent.opacity(0.85), style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                        .frame(width: 211, height: 211)
+                        .rotationEffect(.degrees(charged ? 35 : -14))
+                    Image(systemName: defeated ? "checkmark.shield.fill" : boss.symbol)
+                        .font(.system(size: 93, weight: .ultraLight))
+                        .foregroundStyle(boss.accent)
+                        .shadow(color: boss.accent.opacity(0.65), radius: charged ? 24 : 8)
+                        .scaleEffect(charged ? 1.02 : 0.96)
+                    if defeated {
+                        VStack {
+                            Spacer()
+                            Text("VICTOIRE")
+                                .font(.system(size: 11, weight: .black, design: .rounded))
+                                .tracking(3)
+                                .padding(.horizontal, 16).padding(.vertical, 8)
+                                .foregroundStyle(Nuclear.background)
+                                .background(Nuclear.paleGold, in: Capsule())
+                        }.padding(.bottom, 19)
+                        .opacity(revealed ? 1 : (canAnimate ? 0 : 1))
+                    }
+                }
+                .frame(height: 268)
+                .accessibilityLabel(defeated ? "Boss vaincu" : "Boss en cours")
+
+                NuclearCard {
+                    HStack {
+                        Text(defeated ? "PV DU BOSS · 0 %" : "PV DU BOSS · \(Int((1 - percent) * 100)) %")
+                            .font(.caption.bold()).foregroundStyle(boss.accent)
+                        Spacer()
+                        Text(boss.phase(for: count))
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(Nuclear.paleGold)
+                    }
+                    ProgressView(value: Double(remaining), total: Double(boss.target))
+                        .tint(boss.accent)
+                    HStack {
+                        Label("\(min(count, boss.target)) / \(boss.target) jours", systemImage: "dumbbell.fill")
+                        Spacer()
+                        Text(boss.period)
+                    }
+                    .font(.caption2).foregroundStyle(Nuclear.muted)
+                }
+
+                NuclearCard {
+                    Text(defeated ? boss.victoryText : "LA BATAILLE CONTINUE")
+                        .font(.headline.bold()).foregroundStyle(defeated ? Nuclear.paleGold : .white)
+                    Text(defeated
+                         ? "Récompense de \(boss.reward) XP déjà calculée par le système de quêtes. Aucun bonus supplémentaire à réclamer."
+                         : boss.legend)
+                        .font(.subheadline).foregroundStyle(Nuclear.ink)
+                    if !defeated {
+                        Text("Encore \(remaining) journée\(remaining > 1 ? "s" : "") de séance pour vaincre ce boss, sans limite de séries consécutives.")
+                            .font(.caption).foregroundStyle(boss.accent)
+                    }
+                }
+                Text("Aucune action dans cette arène n'ajoute d'XP. Le repos est toujours autorisé et n'inflige aucun dégât à ta progression.")
+                    .font(.caption2).foregroundStyle(Nuclear.muted)
+                    .multilineTextAlignment(.center)
+                    .padding(.bottom, 16)
+            }
+            .padding(18)
+        }
+        .background(Nuclear.background.ignoresSafeArea())
+        .navigationTitle("Arène")
+        .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            if canAnimate {
+                withAnimation(.easeInOut(duration: 4.5).repeatForever(autoreverses: true)) {
+                    charged = true
+                }
+                withAnimation(.easeOut(duration: 1.4)) { revealed = true }
+            } else {
+                charged = false
+                revealed = true
+            }
+        }
+        .onChange(of: effectsEnabled) { _, enabled in
+            if !enabled { charged = false; revealed = true }
         }
     }
 }
