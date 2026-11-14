@@ -12,6 +12,207 @@ private enum Nuclear {
     static let muted = Color(red: 0.64, green: 0.63, blue: 0.73)
 }
 
+// V5.2 : presentation des transformations, derivee des XP existants.
+// Aucune donnee supplementaire n'est ecrite dans la sauvegarde JSON.
+private struct NuclearStage: Identifiable {
+    let id: Int
+    let name: String
+    let minLevel: Int
+    let subtitle: String
+    let symbol: String
+    let accent: Color
+
+    static let all: [NuclearStage] = [
+        .init(id: 0, name: "SURVIVANT", minLevel: 1, subtitle: "Le premier souffle", symbol: "shield.fill", accent: .gray),
+        .init(id: 1, name: "ÉVEIL", minLevel: 3, subtitle: "L'étincelle intérieure", symbol: "sparkles", accent: Nuclear.gold),
+        .init(id: 2, name: "RÉACTEUR", minLevel: 6, subtitle: "Le coeur s'embrase", symbol: "bolt.fill", accent: .orange),
+        .init(id: 3, name: "NUCLÉAIRE", minLevel: 10, subtitle: "Le pouvoir rayonne", symbol: "atom", accent: Nuclear.purple),
+        .init(id: 4, name: "ASCENSION", minLevel: 15, subtitle: "Au-delà des limites", symbol: "crown.fill", accent: Nuclear.paleGold)
+    ]
+
+    static func current(level: Int) -> NuclearStage {
+        all.last(where: { level >= $0.minLevel }) ?? all[0]
+    }
+}
+
+private struct NuclearAward: Identifiable {
+    let id: String
+    let name: String
+    let detail: String
+    let icon: String
+    let achieved: Bool
+}
+
+private enum NuclearProgress {
+    static func awards(_ data: BiluxData, level: Int) -> [NuclearAward] {
+        let allExercises = data.workouts.flatMap(\.exercises)
+        let names = Set(allExercises.map { $0.name.trimmingCharacters(in: .whitespacesAndNewlines).folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current) }.filter { !$0.isEmpty })
+        return [
+            .init(id: "first", name: "PREMIER COMBAT", detail: "Enregistrer une séance", icon: "bolt.shield.fill", achieved: !data.workouts.isEmpty),
+            .init(id: "five", name: "FORGERON", detail: "5 séances consignées", icon: "dumbbell.fill", achieved: data.workouts.count >= 5),
+            .init(id: "ten", name: "INARRÊTABLE", detail: "10 séances consignées", icon: "flame.fill", achieved: data.workouts.count >= 10),
+            .init(id: "explorer", name: "EXPLORATEUR", detail: "5 exercices différents", icon: "figure.strengthtraining.traditional", achieved: names.count >= 5),
+            .init(id: "journal", name: "JOURNAL VIVANT", detail: "5 jours de suivi consignés", icon: "book.closed.fill", achieved: recordedDays(data) >= 5),
+            .init(id: "ascend", name: "RÉVEIL DU RÉACTEUR", detail: "Atteindre le niveau 6", icon: "atom", achieved: level >= 6)
+        ]
+    }
+
+    static func recordedDays(_ data: BiluxData) -> Int {
+        let dates = data.workouts.map(\.date) + data.meals.map(\.date) + data.checkins.map(\.date)
+        return Set(dates.map { Calendar.current.startOfDay(for: $0) }).count
+    }
+
+    static func uniqueExercises(_ data: BiluxData) -> Int {
+        Set(data.workouts.flatMap(\.exercises).map {
+            $0.name.trimmingCharacters(in: .whitespacesAndNewlines).folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+        }.filter { !$0.isEmpty }).count
+    }
+
+    static func numberOfSets(_ data: BiluxData) -> Int {
+        data.workouts.reduce(0) { $0 + $1.exercises.reduce(0) { $0 + $1.sets.count } }
+    }
+
+    static func recordLoad(_ data: BiluxData) -> (name: String, weight: Double)? {
+        data.workouts.flatMap(\.exercises)
+            .flatMap { exercise in exercise.sets.map { (name: exercise.name, weight: $0.weight) } }
+            .filter { $0.weight > 0 }
+            .max(by: { $0.weight < $1.weight })
+    }
+
+    static func recordRepetitions(_ data: BiluxData) -> (name: String, reps: Int)? {
+        data.workouts.flatMap(\.exercises)
+            .flatMap { exercise in exercise.sets.map { (name: exercise.name, reps: $0.reps) } }
+            .filter { $0.reps > 0 }
+            .max(by: { $0.reps < $1.reps })
+    }
+
+    static func weeklyVolumes(_ data: BiluxData) -> [Double] {
+        let calendar = Calendar.current
+        guard let thisWeek = calendar.dateInterval(of: .weekOfYear, for: .now) else { return Array(repeating: 0, count: 6) }
+        return (0..<6).map { index in
+            let offset = index - 5
+            guard let start = calendar.date(byAdding: .weekOfYear, value: offset, to: thisWeek.start),
+                  let end = calendar.date(byAdding: .weekOfYear, value: 1, to: start) else { return 0 }
+            return data.workouts.filter { $0.date >= start && $0.date < end }.reduce(0) { $0 + $1.volume }
+        }
+    }
+}
+
+private struct NuclearHeroAura: View {
+    let level: Int
+    let effectsEnabled: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var energized = false
+
+    private var stage: NuclearStage { NuclearStage.current(level: level) }
+    private var animate: Bool { effectsEnabled && !reduceMotion }
+
+    var body: some View {
+        ZStack {
+            Image("BiluxHero")
+                .resizable().scaledToFill()
+                .overlay {
+                    LinearGradient(colors: [stage.accent.opacity(0.03), Nuclear.purple.opacity(Double(stage.id) * 0.06), .clear],
+                                   startPoint: .topTrailing, endPoint: .bottomLeading)
+                    .blendMode(.screen)
+                }
+                .clipped()
+            RadialGradient(colors: [stage.accent.opacity(0.07 + Double(stage.id) * 0.03), .clear],
+                           center: .center, startRadius: 40, endRadius: 230)
+                .blendMode(.screen)
+            Circle().trim(from: 0.06, to: 0.82)
+                .stroke(AngularGradient(colors: [.clear, stage.accent.opacity(0.75), Nuclear.purple, .clear], center: .center),
+                        style: StrokeStyle(lineWidth: 2.4, lineCap: .round))
+                .frame(width: 225, height: 225)
+                .rotationEffect(.degrees(energized && animate ? 26 : -12))
+                .opacity(stage.id > 0 ? 0.67 : 0.20)
+                .blendMode(.screen)
+            VStack {
+                HStack {
+                    Image(systemName: stage.symbol)
+                        .foregroundStyle(stage.accent)
+                        .font(.system(size: 20, weight: .bold))
+                        .padding(12)
+                        .background(.black.opacity(0.58), in: Circle())
+                    Spacer()
+                    Text(stage.name)
+                        .font(.system(size: 11, weight: .black, design: .rounded))
+                        .tracking(1.4)
+                        .padding(.horizontal, 12).padding(.vertical, 8)
+                        .background(.black.opacity(0.70), in: Capsule())
+                        .foregroundStyle(stage.accent)
+                }
+                Spacer()
+            }.padding(18)
+        }
+        .onAppear { energized = true }
+        .animation(animate ? .easeInOut(duration: 3.4).repeatForever(autoreverses: true) : .none, value: energized)
+        .accessibilityLabel("Avatar BILUX, transformation " + stage.name)
+    }
+}
+
+private struct NuclearSkillRow: View {
+    let title: String
+    let subtitle: String
+    let value: Int
+    let goal: Int
+    let icon: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            HStack(spacing: 8) {
+                Image(systemName: icon).foregroundStyle(Nuclear.gold)
+                Text(title).font(.subheadline.bold()).foregroundStyle(.white)
+                Spacer()
+                Text("\(min(value, goal))/\(goal)").font(.caption.monospacedDigit()).foregroundStyle(Nuclear.paleGold)
+            }
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Nuclear.purple.opacity(0.24))
+                    Capsule().fill(LinearGradient(colors: [Nuclear.purple, Nuclear.gold], startPoint: .leading, endPoint: .trailing))
+                        .frame(width: max(0, geometry.size.width * CGFloat(min(value, goal)) / CGFloat(max(goal, 1))))
+                }
+            }.frame(height: 7)
+            Text(subtitle).font(.caption2).foregroundStyle(Nuclear.muted)
+        }
+    }
+}
+
+private struct NuclearLevelUp: View {
+    let level: Int
+    let onDismiss: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var revealed = false
+
+    var body: some View {
+        ZStack {
+            Nuclear.background.opacity(0.96).ignoresSafeArea()
+            RadialGradient(colors: [Nuclear.purple.opacity(0.42), .clear], center: .center, startRadius: 20, endRadius: 330)
+                .ignoresSafeArea()
+            VStack(spacing: 20) {
+                Image(systemName: "crown.fill")
+                    .font(.system(size: 64, weight: .black))
+                    .foregroundStyle(Nuclear.gold)
+                    .scaleEffect(revealed ? 1.0 : 0.7)
+                Text("NIVEAU SUPÉRIEUR")
+                    .font(.caption.bold()).tracking(3).foregroundStyle(Nuclear.paleGold)
+                Text("\(level)")
+                    .font(.system(size: 100, weight: .black, design: .rounded))
+                    .foregroundStyle(.white)
+                Text("RANG : " + NuclearStage.current(level: level).name)
+                    .font(.title3.bold()).foregroundStyle(Nuclear.gold)
+                Text("Ta progression est enregistrée.")
+                    .foregroundStyle(Nuclear.muted)
+                Button("CONTINUER L'ASCENSION", action: onDismiss)
+                    .buttonStyle(.borderedProminent).tint(Nuclear.gold)
+                    .padding(.top, 20)
+            }
+            .padding(28)
+        }
+        .onAppear { withAnimation(reduceMotion ? nil : .spring(response: 0.6, dampingFraction: 0.65)) { revealed = true } }
+    }
+}
+
 struct MainTabs: View {
     @State private var selected: Int = 0
 
@@ -153,6 +354,10 @@ struct HomeScreen: View {
     @EnvironmentObject private var journal: BiluxStore
     @EnvironmentObject private var health: HealthKitManager
     @State private var pulse = false
+    @AppStorage("bilux.effectsEnabled") private var effectsEnabled = true
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage("bilux.lastCelebratedLevel") private var lastCelebratedLevel = 0
+    @State private var showLevelUp = false
 
     var body: some View {
         NavigationStack {
@@ -224,18 +429,34 @@ struct HomeScreen: View {
             .toolbar(.hidden, for: .navigationBar)
             .modifier(PageBackground())
             .task { if health.hasRequested { await health.refresh() } }
-            .onAppear { pulse = true }
+            .onAppear { pulse = true; checkForLevelUp() }
+            .onChange(of: journal.heroLevel) { _, _ in checkForLevelUp() }
+            .fullScreenCover(isPresented: $showLevelUp) {
+                NuclearLevelUp(level: journal.heroLevel) {
+                    lastCelebratedLevel = max(lastCelebratedLevel, journal.heroLevel)
+                    showLevelUp = false
+                }
+            }
             .alert("BILUX", isPresented: Binding(get: { health.message != nil }, set: { if !$0 { health.message = nil } })) {
                 Button("OK") { health.message = nil }
             } message: { Text(health.message ?? "") }
         }
     }
 
+    private func checkForLevelUp() {
+        let level = journal.heroLevel
+        if lastCelebratedLevel == 0 {
+            // La premiere ouverture apres mise a jour ne declenche pas une fausse recompense.
+            lastCelebratedLevel = level
+        } else if level > lastCelebratedLevel {
+            showLevelUp = true
+        }
+    }
+
     private var heroPanel: some View {
         ZStack(alignment: .bottomLeading) {
             GeometryReader { geometry in
-                Image("BiluxHero")
-                    .resizable().scaledToFill()
+                NuclearHeroAura(level: journal.heroLevel, effectsEnabled: effectsEnabled)
                     .frame(width: geometry.size.width, height: geometry.size.height)
                     .clipped()
             }
@@ -248,7 +469,7 @@ struct HomeScreen: View {
                         Circle().stroke(Nuclear.gold.opacity(0.65), lineWidth: 1)
                             .frame(width: 62, height: 62)
                             .scaleEffect(pulse ? 1.04 : 0.93)
-                            .animation(.easeInOut(duration: 2.5).repeatForever(autoreverses: true), value: pulse)
+                            .animation((effectsEnabled && !reduceMotion) ? .easeInOut(duration: 2.5).repeatForever(autoreverses: true) : .none, value: pulse)
                         Image(systemName: "crown.fill")
                             .font(.system(size: 27)).foregroundStyle(Nuclear.paleGold)
                     }
@@ -349,6 +570,65 @@ struct SportScreen: View {
                     HStack {
                         StatTile(label: "Séances", value: "\(journal.data.workouts.count)", icon: "dumbbell.fill")
                         StatTile(label: "Volume total", value: unit(journal.data.workouts.reduce(0) { $0 + $1.volume }, "kg·rép"), icon: "chart.line.uptrend.xyaxis")
+                    }
+                    SectionCaption(title: "Records de la forge")
+                    NuclearCard {
+                        HStack {
+                            Image(systemName: "trophy.fill").foregroundStyle(Nuclear.gold)
+                            Text("TES MEILLEURES MARQUES").font(.caption.bold()).tracking(1)
+                        }
+                        if let record = NuclearProgress.recordLoad(journal.data) {
+                            HStack {
+                                Text("Charge maximale").foregroundStyle(Nuclear.muted)
+                                Spacer()
+                                Text(unit(record.weight, "kg", decimals: 1)).foregroundStyle(Nuclear.gold).bold()
+                            }.font(.subheadline)
+                            Text(record.name).font(.caption2).foregroundStyle(Nuclear.muted)
+                        }
+                        if let record = NuclearProgress.recordRepetitions(journal.data) {
+                            HStack {
+                                Text("Répétitions sur une série").foregroundStyle(Nuclear.muted)
+                                Spacer()
+                                Text("\(record.reps) reps").foregroundStyle(Nuclear.gold).bold()
+                            }.font(.subheadline)
+                            Text(record.name).font(.caption2).foregroundStyle(Nuclear.muted)
+                        }
+                        if let best = journal.data.workouts.max(by: { $0.volume < $1.volume }), best.volume > 0 {
+                            HStack {
+                                Text("Volume sur une séance").foregroundStyle(Nuclear.muted)
+                                Spacer()
+                                Text(unit(best.volume, "kg·rép")).foregroundStyle(Nuclear.gold).bold()
+                            }.font(.subheadline)
+                        }
+                        if journal.data.workouts.isEmpty {
+                            Text("Tes records apparaîtront après ta première séance.")
+                                .font(.caption).foregroundStyle(Nuclear.muted)
+                        }
+                        Text("Records calculés uniquement sur les séries saisies dans BILUX. Aucun maximum théorique estimé.")
+                            .font(.caption2).foregroundStyle(Nuclear.muted)
+                    }
+                    SectionCaption(title: "Volume hebdomadaire")
+                    NuclearCard {
+                        let volumes = NuclearProgress.weeklyVolumes(journal.data)
+                        let maxVolume = max(volumes.max() ?? 0, 1)
+                        HStack(alignment: .bottom, spacing: 11) {
+                            ForEach(0..<volumes.count, id: \.self) { index in
+                                VStack(spacing: 6) {
+                                    Text(volumes[index] > 0 ? BiluxFormat.number(volumes[index]) : "—")
+                                        .font(.system(size: 8, weight: .semibold)).foregroundStyle(Nuclear.paleGold)
+                                        .lineLimit(1).minimumScaleFactor(0.5)
+                                    RoundedRectangle(cornerRadius: 5)
+                                        .fill(LinearGradient(colors: [Nuclear.gold, Nuclear.purple], startPoint: .top, endPoint: .bottom))
+                                        .frame(height: max(4, 78 * CGFloat(volumes[index] / maxVolume)))
+                                        .frame(maxHeight: 80, alignment: .bottom)
+                                    Text(index == 5 ? "Cette sem." : "S-\(5-index)")
+                                        .font(.system(size: 8)).foregroundStyle(Nuclear.muted)
+                                        .lineLimit(1).minimumScaleFactor(0.6)
+                                }.frame(maxWidth: .infinity, alignment: .bottom)
+                            }
+                        }.frame(height: 118, alignment: .bottom)
+                        Text("Volume = charge × répétitions ; les activités sans charge restent à zéro.")
+                            .font(.caption2).foregroundStyle(Nuclear.muted)
                     }
                     Button { showNew = true } label: { Label("CRÉER UNE SÉANCE", systemImage: "plus.circle.fill").frame(maxWidth: .infinity) }
                         .buttonStyle(.borderedProminent).tint(Nuclear.gold)
@@ -490,23 +770,20 @@ struct AscensionScreen: View {
     @EnvironmentObject private var journal: BiluxStore
     @State private var showingImporter = false
     @State private var exportFile: URL?
+    @AppStorage("bilux.effectsEnabled") private var effectsEnabled = true
+    @State private var selectedStage = 0
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 15) {
-                   
-GeometryReader { geometry in
-    Image("BiluxHero")
-        .resizable()
-        .scaledToFill()
-        .frame(
-            width: geometry.size.width,
-            height: geometry.size.height
-        )
-        .clipped()
-}
-.frame(height: 250)
-.clipShape(RoundedRectangle(cornerRadius: 15))
+                    GeometryReader { geometry in
+                        NuclearHeroAura(level: journal.heroLevel, effectsEnabled: effectsEnabled)
+                            .frame(width: geometry.size.width, height: geometry.size.height)
+                            .clipped()
+                    }
+                    .frame(height: 275)
+                    .clipShape(RoundedRectangle(cornerRadius: 19))
+                    .overlay(RoundedRectangle(cornerRadius: 19).stroke(Nuclear.gold.opacity(0.55), lineWidth: 1))
                     SectionCaption(title: "Ton ascension")
                     NuclearCard {
                         HStack(spacing: 17) {
@@ -533,6 +810,81 @@ GeometryReader { geometry in
                         Text("+25 XP par séance, +8 XP par jour de repas saisis et +8 XP par jour de bilan. Aucun malus de repos.")
                             .font(.caption).foregroundStyle(Nuclear.muted)
                     }
+                    SectionCaption(title: "Les cinq transformations")
+                    Text("Les formes se débloquent automatiquement avec tes XP. L'image conserve ton avatar actuel ; son aura et son emblème évoluent.")
+                        .font(.caption).foregroundStyle(Nuclear.muted)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(NuclearStage.all) { stage in
+                                let unlocked = journal.heroLevel >= stage.minLevel
+                                Button { selectedStage = stage.id } label: {
+                                    VStack(alignment: .leading, spacing: 9) {
+                                        Image(systemName: unlocked ? stage.symbol : "lock.fill")
+                                            .font(.title3).foregroundStyle(unlocked ? stage.accent : Nuclear.muted)
+                                        Text(stage.name).font(.caption.bold()).foregroundStyle(.white)
+                                        Text(unlocked ? "DÉBLOQUÉ" : "NIV. \(stage.minLevel)")
+                                            .font(.system(size: 9, weight: .bold)).foregroundStyle(unlocked ? Nuclear.gold : Nuclear.muted)
+                                    }
+                                    .padding(13).frame(width: 132, height: 110, alignment: .leading)
+                                    .background(selectedStage == stage.id ? stage.accent.opacity(0.22) : Nuclear.panel,
+                                                in: RoundedRectangle(cornerRadius: 15))
+                                    .overlay(RoundedRectangle(cornerRadius: 15)
+                                        .stroke(selectedStage == stage.id ? stage.accent : Nuclear.purple.opacity(0.3)))
+                                }.buttonStyle(.plain)
+                            }
+                        }.padding(.vertical, 4)
+                    }
+                    NuclearCard {
+                        let stage = NuclearStage.all[selectedStage]
+                        HStack {
+                            Text(stage.name).font(.headline).foregroundStyle(Nuclear.paleGold)
+                            Spacer()
+                            Image(systemName: stage.symbol).foregroundStyle(stage.accent)
+                        }
+                        Text(stage.subtitle).foregroundStyle(.white)
+                        Text(journal.heroLevel >= stage.minLevel
+                             ? "Transformation acquise · niveau \(stage.minLevel)"
+                             : "Encore verrouillée · disponible au niveau \(stage.minLevel)")
+                            .font(.caption).foregroundStyle(Nuclear.muted)
+                    }
+                    SectionCaption(title: "Arbre de maîtrise")
+                    NuclearCard {
+                        NuclearSkillRow(title: "Discipline", subtitle: "Séances consignées, sans obligation quotidienne",
+                                        value: journal.data.workouts.count, goal: 10, icon: "dumbbell.fill")
+                        NuclearSkillRow(title: "Puissance", subtitle: "Séries enregistrées, avec ou sans charge",
+                                        value: NuclearProgress.numberOfSets(journal.data), goal: 100, icon: "bolt.fill")
+                        NuclearSkillRow(title: "Exploration", subtitle: "Exercices différents expérimentés",
+                                        value: NuclearProgress.uniqueExercises(journal.data), goal: 20, icon: "figure.strengthtraining.traditional")
+                        NuclearSkillRow(title: "Chroniques", subtitle: "Jours de suivi, non nécessairement consécutifs",
+                                        value: NuclearProgress.recordedDays(journal.data), goal: 14, icon: "book.closed.fill")
+                        Text("Ces voies sont des indicateurs ludiques : elles ne donnent pas de bonus médical ou de performance.")
+                            .font(.caption2).foregroundStyle(Nuclear.muted)
+                    }
+                    SectionCaption(title: "Trophées du réacteur")
+                    let awards = NuclearProgress.awards(journal.data, level: journal.heroLevel)
+                    Text("\(awards.filter(\.achieved).count) / \(awards.count) débloqués")
+                        .font(.caption).foregroundStyle(Nuclear.paleGold)
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                        ForEach(awards) { award in
+                            NuclearCard {
+                                Image(systemName: award.achieved ? award.icon : "lock.fill")
+                                    .font(.title2).foregroundStyle(award.achieved ? Nuclear.gold : Nuclear.muted)
+                                Text(award.name).font(.system(size: 11, weight: .heavy)).foregroundStyle(.white)
+                                    .lineLimit(2).minimumScaleFactor(0.7)
+                                Text(award.detail).font(.caption2).foregroundStyle(Nuclear.muted)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                Text(award.achieved ? "ACQUIS" : "À DÉBLOQUER")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(award.achieved ? Nuclear.gold : Nuclear.muted)
+                            }.opacity(award.achieved ? 1 : 0.75)
+                        }
+                    }
+                    SectionCaption(title: "Effets visuels")
+                    NuclearCard {
+                        Toggle("Animations nucléaires", isOn: $effectsEnabled).tint(Nuclear.gold)
+                        Text("Désactive les effets animés pour économiser la batterie. Le réglage de réduction des animations d'iOS est respecté.")
+                            .font(.caption2).foregroundStyle(Nuclear.muted)
+                    }
                     SectionCaption(title: "Continuité depuis la V3 web")
                     NuclearCard {
                         Text("Transférer l'historique V3").font(.headline)
@@ -556,6 +908,7 @@ GeometryReader { geometry in
                 }.padding(16)
             }
             .navigationTitle("Ascension").modifier(PageBackground())
+            .onAppear { selectedStage = NuclearStage.current(level: journal.heroLevel).id }
             .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.json]) { result in
                 switch result {
                 case .success(let url): journal.importJSON(url)
