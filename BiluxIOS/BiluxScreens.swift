@@ -114,7 +114,13 @@ private struct NuclearHeroAura: View {
     let effectsEnabled: Bool
     let stageOverride: NuclearStage?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    // V5.3.1 : on n'anime JAMAIS la taille du GeometryReader ou de la photo.
+    // Seuls les overlays energetiques et l'opacite des portraits sont animes.
     @State private var energized = false
+    @State private var outgoingArtwork: String? = nil
+    @State private var incomingOpacity: Double = 1
+    @State private var fadeTask: Task<Void, Never>? = nil
 
     init(level: Int, effectsEnabled: Bool, stageOverride: NuclearStage? = nil) {
         self.level = level
@@ -127,30 +133,57 @@ private struct NuclearHeroAura: View {
     private var animate: Bool { effectsEnabled && !reduceMotion && !lockedPreview }
 
     var body: some View {
-        GeometryReader { container in
+        GeometryReader { geometry in
+            let width = max(1, geometry.size.width)
+            let height = max(1, geometry.size.height)
+
             ZStack {
-                Image(stage.artwork)
-                    .resizable()
-                    .scaledToFill()
-                    .frame(width: container.size.width, height: container.size.height)
-                    .saturation(lockedPreview ? 0.17 : 1)
-                    .overlay {
-                        LinearGradient(colors: [stage.accent.opacity(0.02), Nuclear.purple.opacity(0.08 + Double(stage.id) * 0.02), .clear],
-                                       startPoint: .topTrailing, endPoint: .bottomLeading)
-                        .blendMode(.screen)
-                    }
-                    .clipped()
-                RadialGradient(colors: [stage.accent.opacity(animate ? 0.26 : 0.12), .clear],
-                               center: .center, startRadius: 20, endRadius: 260)
-                    .blendMode(.screen)
-                    .scaleEffect(energized && animate ? 1.15 : 0.92)
-                Circle().trim(from: 0.03, to: 0.79)
-                    .stroke(AngularGradient(colors: [.clear, stage.accent.opacity(0.86), Nuclear.purple, .clear], center: .center),
-                            style: StrokeStyle(lineWidth: stage.id >= 3 ? 3.2 : 2.1, lineCap: .round))
-                    .frame(width: min(container.size.width * 0.64, 235), height: min(container.size.width * 0.64, 235))
+                // Photo entrante dans un rectangle FIXE : aucune deformation d'aspect.
+                portrait(stage.artwork, width: width, height: height)
+                    .opacity(incomingOpacity)
+
+                // On conserve la photo sortante pendant le fondu uniquement.
+                if let outgoingArtwork {
+                    portrait(outgoingArtwork, width: width, height: height)
+                        .opacity(1 - incomingOpacity)
+                }
+
+                LinearGradient(
+                    colors: [stage.accent.opacity(0.02),
+                             Nuclear.purple.opacity(0.08 + Double(stage.id) * 0.02), .clear],
+                    startPoint: .topTrailing, endPoint: .bottomLeading
+                )
+                .blendMode(.screen)
+                .allowsHitTesting(false)
+
+                // L'animation est LOCALE : elle ne touche pas la geometrie du portrait.
+                RadialGradient(
+                    colors: [stage.accent.opacity(animate ? 0.22 : 0.10), .clear],
+                    center: .center, startRadius: 20, endRadius: 260
+                )
+                .frame(width: width, height: height)
+                .scaleEffect(energized && animate ? 1.12 : 0.94)
+                .animation(animate ? .easeInOut(duration: 2.6).repeatForever(autoreverses: true) : nil,
+                           value: energized)
+                .blendMode(.screen)
+                .allowsHitTesting(false)
+
+                Circle()
+                    .trim(from: 0.03, to: 0.79)
+                    .stroke(
+                        AngularGradient(colors: [.clear, stage.accent.opacity(0.86),
+                                                 Nuclear.purple, .clear], center: .center),
+                        style: StrokeStyle(lineWidth: stage.id >= 3 ? 3.2 : 2.1,
+                                           lineCap: .round)
+                    )
+                    .frame(width: min(width * 0.64, 235), height: min(width * 0.64, 235))
                     .rotationEffect(.degrees(energized && animate ? 24 : -12))
+                    .animation(animate ? .easeInOut(duration: 3.2).repeatForever(autoreverses: true) : nil,
+                               value: energized)
                     .opacity(lockedPreview ? 0.32 : 0.75)
                     .blendMode(.screen)
+                    .allowsHitTesting(false)
+
                 VStack {
                     HStack(spacing: 8) {
                         Image(systemName: lockedPreview ? "lock.fill" : stage.symbol)
@@ -163,18 +196,66 @@ private struct NuclearHeroAura: View {
                             .font(.system(size: 10, weight: .black, design: .rounded))
                             .tracking(1.0)
                             .foregroundStyle(stage.accent)
-                            .padding(.horizontal, 12).padding(.vertical, 8)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
                             .background(.black.opacity(0.72), in: Capsule())
                     }
                     Spacer()
-                }.padding(12)
+                }
+                .padding(12)
             }
-            .frame(width: container.size.width, height: container.size.height)
+            .frame(width: width, height: height)
             .clipped()
         }
-        .onAppear { energized = true }
-        .animation(animate ? .easeInOut(duration: 3).repeatForever(autoreverses: true) : .none, value: energized)
-        .accessibilityLabel("Avatar BILUX : " + stage.name + (lockedPreview ? ", verrouille" : ", debloque"))
+        // Surtout PAS de .animation(repeatForever) sur le GeometryReader entier.
+        .onAppear { energized = animate }
+        .onChange(of: stage.id) { oldID, _ in
+            changePortrait(from: oldID)
+        }
+        .onChange(of: animate) { _, enabled in
+            energized = enabled
+            if !enabled {
+                fadeTask?.cancel()
+                outgoingArtwork = nil
+                incomingOpacity = 1
+            }
+        }
+        .onDisappear { fadeTask?.cancel() }
+        .accessibilityLabel("Avatar BILUX : " + stage.name +
+                            (lockedPreview ? ", verrouillé" : ", débloqué"))
+    }
+
+    private func portrait(_ asset: String, width: CGFloat, height: CGFloat) -> some View {
+        Image(asset)
+            .resizable()
+            .scaledToFill()
+            .frame(width: width, height: height)
+            .clipped()
+            .saturation(lockedPreview ? 0.17 : 1)
+            .accessibilityHidden(true)
+    }
+
+    private func changePortrait(from oldID: Int) {
+        fadeTask?.cancel()
+        guard animate,
+              let former = NuclearStage.all.first(where: { $0.id == oldID }),
+              former.artwork != stage.artwork else {
+            outgoingArtwork = nil
+            incomingOpacity = 1
+            return
+        }
+
+        // Animation uniquement sur l'opacite (jamais sur frame / scaledToFill).
+        outgoingArtwork = former.artwork
+        incomingOpacity = 0
+        withAnimation(.easeInOut(duration: 0.55)) {
+            incomingOpacity = 1
+        }
+        fadeTask = Task {
+            try? await Task.sleep(nanoseconds: 650_000_000)
+            guard !Task.isCancelled else { return }
+            outgoingArtwork = nil
+        }
     }
 }
 
