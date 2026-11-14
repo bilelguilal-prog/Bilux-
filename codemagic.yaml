@@ -21,6 +21,26 @@ workflows:
     artifacts:
       - /tmp/bilux-build.log
 
+
+  verification-watch-sans-signature:
+    name: BILUX V4.1 - Verifier Apple Watch (sans signature)
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      xcode: latest
+    scripts:
+      - name: Compiler l'app Apple Watch pour simulateur
+        script: |
+          set -o pipefail
+          xcodebuild -project BiluxIOS.xcodeproj \
+            -scheme BiluxWatch \
+            -configuration Debug \
+            -destination 'generic/platform=watchOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO build \
+            2>&1 | tee /tmp/bilux-watch-build.log
+    artifacts:
+      - /tmp/bilux-watch-build.log
+
   distribution-testflight:
     name: BILUX - Publier sur TestFlight (compte Apple payant requis)
     instance_type: mac_mini_m2
@@ -33,8 +53,12 @@ workflows:
         distribution_type: app_store
         bundle_identifier: com.bilux.nuclearascension # Adapter si besoin, egalement dans le .xcodeproj
     scripts:
-      - name: Appliquer les profils Apple
-        script: xcode-project use-profiles
+      # Le projet contient maintenant DEUX identifiants à signer :
+      # com.bilux.nuclearascension et com.bilux.nuclearascension.watchkitapp.
+      # Créer/autoriser l'identifiant watchOS dans Apple Developer et laisser
+      # Codemagic récupérer un profil de distribution pour chaque cible.
+      - name: Appliquer les profils Apple (iPhone et Watch)
+        script: xcode-project use-profiles --project BiluxIOS.xcodeproj
       - name: Construire la version TestFlight
         script: |
           xcode-project build-ipa \

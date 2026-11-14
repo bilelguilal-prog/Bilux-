@@ -4,6 +4,11 @@ import json, textwrap
 root=Path(__file__).parent
 src=root/'BiluxIOS'
 proj=root/'BiluxIOS.xcodeproj'
+# V4.1 : ce vieux générateur mono-cible ne doit jamais écraser le projet watchOS.
+# Conserver le project.pbxproj livré, qui contient les cibles BiluxIOS et BiluxWatch.
+if (proj/'project.pbxproj').exists():
+ print('Le projet Xcode existe déjà. Génération ignorée pour préserver BiluxWatch.')
+ raise SystemExit(0)
 proj.mkdir(exist_ok=True)
 files=['BiluxApp.swift','Models.swift','BiluxStore.swift','V3Import.swift','HealthKitManager.swift','BiluxScreens.swift','EntryForms.swift','Assets.xcassets','BiluxIOS.entitlements']
 getid=lambda s:sha1(s.encode('utf8')).hexdigest()[:24].upper()
