@@ -55,6 +55,7 @@ workflows:
         provisioning_profiles:
           - BILUX-AppStore
           - bilux_watch_appstore
+          - bilux_widget_appstore
     scripts:
       # Le projet contient maintenant DEUX identifiants à signer :
       # com.bilux.nuclearascension et com.bilux.nuclearascension.watchkitapp.
