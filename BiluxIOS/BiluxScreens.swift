@@ -1819,7 +1819,6 @@ private struct BILUXV58Codex: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage("bilux.effectsEnabled") private var effectsEnabled = true
     @State private var activeTab: BILUXV58CodexTab = .bestiary
-    @State private var selectedBoss: BILUXV56Boss?
     @State private var cinematicStage: NuclearStage?
 
     private var achievements: [NuclearAward] {
@@ -1863,6 +1862,11 @@ private struct BILUXV58Codex: View {
                     }
                 }
             }
+            // V5.8.2 : navigation native dans le Codex, sans seconde sheet imbriquée.
+            // Les deux dossiers (Gardien et Souverain) utilisent le même chemin.
+            .navigationDestination(for: BILUXV56Boss.self) { boss in
+                BILUXV56BossBattle(boss: boss).environmentObject(journal)
+            }
             .navigationTitle("Codex")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -1871,18 +1875,6 @@ private struct BILUXV58Codex: View {
                         .foregroundStyle(Nuclear.gold)
                 }
             }
-        }
-        .sheet(item: $selectedBoss) { boss in
-            NavigationStack {
-                BILUXV56BossBattle(boss: boss)
-                    .environmentObject(journal)
-                    .toolbar {
-                        ToolbarItem(placement: .topBarTrailing) {
-                            Button("Fermer") { selectedBoss = nil }
-                        }
-                    }
-            }
-            .presentationDragIndicator(.visible)
         }
         .fullScreenCover(item: $cinematicStage) { stage in
             BILUXV57RankCinema(stage: stage, effectsEnabled: effectsEnabled) {
@@ -1964,6 +1956,7 @@ private struct BILUXV58Codex: View {
         .accessibilityAddTraits(activeTab == tab ? .isSelected : [])
     }
 
+    // V5.8.2 : navigation directe par NavigationLink pour les deux dossiers.
     private var bestiary: some View {
         VStack(alignment: .leading, spacing: 14) {
             SectionCaption(title: "Bestiaire nucléaire")
@@ -1995,13 +1988,16 @@ private struct BILUXV58Codex: View {
                         Text("\(wins) victoire\(wins > 1 ? "s" : "")")
                     }
                     .font(.caption2.monospacedDigit()).foregroundStyle(Nuclear.paleGold)
-                    Button {
-                        selectedBoss = boss
-                    } label: {
+                    // V5.8.2 : une destination native par boss, plus de sheet à déclencher.
+                    NavigationLink(value: boss) {
                         Label("VOIR LE DOSSIER DE COMBAT", systemImage: "shield.lefthalf.filled")
-                            .frame(maxWidth: .infinity)
+                            .font(.subheadline.bold())
+                            .frame(maxWidth: .infinity, minHeight: 50)
+                            .contentShape(Rectangle())
                     }
-                    .buttonStyle(.borderedProminent).tint(boss.accent)
+                    .buttonStyle(.borderedProminent)
+                    .tint(boss.accent)
+                    .accessibilityIdentifier("bilux.codex.dossier.\(boss.id)")
                 }
             }
             Text("Victoires recensées uniquement depuis l'activation de la progression V5.5 ; les victoires antérieures ne sont pas reconstituées.")
