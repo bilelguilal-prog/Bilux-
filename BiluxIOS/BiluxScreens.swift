@@ -1828,25 +1828,41 @@ private struct BILUXV58Codex: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    header
-                    tabs
-                    switch activeTab {
-                    case .bestiary: bestiary
-                    case .trophies: trophies
-                    case .chronicles: chronicles
-                    case .gallery: gallery
-                    case .secrets: secrets
+            ScrollViewReader { scrollProxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 18, pinnedViews: [.sectionHeaders]) {
+                        header
+                        Section {
+                            VStack(alignment: .leading, spacing: 18) {
+                                switch activeTab {
+                                case .bestiary: bestiary
+                                case .trophies: trophies
+                                case .chronicles: chronicles
+                                case .gallery: gallery
+                                case .secrets: secrets
+                                }
+                                Text("Archives calculées depuis ton journal local. Le Codex ne donne pas d'XP et n'impose aucune série de jours consécutifs.")
+                                    .font(.caption2)
+                                    .foregroundStyle(Nuclear.muted)
+                                    .padding(.bottom, 18)
+                            }
+                            .id("codex-rubrique")
+                        } header: {
+                            tabs
+                                .padding(.vertical, 8)
+                                .background(Nuclear.background.opacity(0.98))
+                        }
                     }
-                    Text("Archives calculées depuis ton journal local. Le Codex ne donne pas d'XP et n'impose aucune série de jours consécutifs.")
-                        .font(.caption2)
-                        .foregroundStyle(Nuclear.muted)
-                        .padding(.bottom, 18)
+                    .padding(.horizontal, 17)
+                    .padding(.top, 17)
                 }
-                .padding(17)
+                .modifier(PageBackground())
+                .onChange(of: activeTab) { _ in
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        scrollProxy.scrollTo("codex-rubrique", anchor: .top)
+                    }
+                }
             }
-            .modifier(PageBackground())
             .navigationTitle("Codex")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -1911,24 +1927,41 @@ private struct BILUXV58Codex: View {
         .background(Nuclear.background.opacity(0.48), in: RoundedRectangle(cornerRadius: 12))
     }
 
+    // V5.8.1 : aucun ScrollView horizontal imbriqué. Grandes zones tactiles stables.
+    // Les deux lignes restent accessibles lorsque l'utilisateur lit une longue rubrique.
     private var tabs: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        VStack(spacing: 8) {
             HStack(spacing: 8) {
-                ForEach(BILUXV58CodexTab.allCases) { tab in
-                    Button { activeTab = tab } label: {
-                        Label(tab.rawValue, systemImage: tab.icon)
-                            .font(.system(size: 12, weight: .bold, design: .rounded))
-                            .padding(.horizontal, 13)
-                            .padding(.vertical, 10)
-                            .foregroundStyle(activeTab == tab ? Nuclear.background : Nuclear.paleGold)
-                            .background(activeTab == tab ? Nuclear.gold : Nuclear.panel, in: Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityAddTraits(activeTab == tab ? .isSelected : [])
-                }
+                codexTabButton(.bestiary)
+                codexTabButton(.trophies)
+                codexTabButton(.chronicles)
             }
-            .padding(.vertical, 4)
+            HStack(spacing: 8) {
+                codexTabButton(.gallery)
+                codexTabButton(.secrets)
+            }
         }
+        .accessibilityElement(children: .contain)
+    }
+
+    private func codexTabButton(_ tab: BILUXV58CodexTab) -> some View {
+        Button {
+            guard activeTab != tab else { return }
+            activeTab = tab
+        } label: {
+            Label(tab.rawValue, systemImage: tab.icon)
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+                .frame(maxWidth: .infinity, minHeight: 48)
+                .padding(.horizontal, 5)
+                .foregroundStyle(activeTab == tab ? Nuclear.background : Nuclear.paleGold)
+                .background(activeTab == tab ? Nuclear.gold : Nuclear.panel,
+                            in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(activeTab == tab ? .isSelected : [])
     }
 
     private var bestiary: some View {
