@@ -109,11 +109,174 @@ private enum NuclearProgress {
 }
 
 // V5.3: vrais portraits par palier, sans effet sur les XP ni les donnees de sante.
+// MARK: - BILUX V6.4 · NUCLEAR EVOLUTION / THUNDERSTORM
+// Procedural vector lightning: paths are re-generated, split and pulsed in real time.
+// This effect has NO HealthKit access, NO timer persisted to disk, and NO XP side effect.
+private enum V64StormMastery {
+    static func dominantPath(_ data: BiluxData) -> String {
+        let branches = V63MasterySnapshot.evaluate(data).branches
+        let most = branches.max { $0.unlockedCount < $1.unlockedCount }
+        return (most?.unlockedCount ?? 0) > 0 ? (most?.id ?? "core") : "core"
+    }
+}
+
+private struct V64StormLightning: View {
+    let stage: Int
+    let masteryCount: Int
+    let dominantPath: String
+    let epic: Bool
+
+    var body: some View {
+        // 24 fps epic, 15 fps balanced; no active timeline when motion is reduced
+        // because the caller only creates this overlay if animations are enabled.
+        TimelineView(.animation(minimumInterval: epic ? 1.0 / 24.0 : 1.0 / 15.0)) { timeline in
+            Canvas(opaque: false, rendersAsynchronously: true) { context, size in
+                V64StormRenderer.draw(&context,
+                                     size: size,
+                                     time: timeline.date.timeIntervalSinceReferenceDate,
+                                     stage: stage,
+                                     masteryCount: masteryCount,
+                                     dominantPath: dominantPath,
+                                     epic: epic)
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+private struct V64StormRNG {
+    private var seed: UInt64
+    init(seed: UInt64) { self.seed = seed == 0 ? 0x9E3779B97F4A7C15 : seed }
+
+    mutating func next() -> CGFloat {
+        seed = seed &* 2862933555777941757 &+ 3037000493
+        return CGFloat(Double(seed >> 11) / 9007199254740992.0)
+    }
+}
+
+private enum V64StormRenderer {
+    private static func colors(path: String, stage: Int) -> (Color, Color) {
+        switch path {
+        case "force": return (Nuclear.gold, Color(red: 1, green: 0.95, blue: 0.76))
+        case "endurance": return (Color(red: 1, green: 0.39, blue: 0.14), Nuclear.gold)
+        case "regularity": return (Nuclear.purple, Color(red: 0.63, green: 0.83, blue: 1))
+        case "mastery": return (Color(red: 0.79, green: 0.87, blue: 1), Nuclear.paleGold)
+        default: return stage >= 3 ? (Nuclear.purple, Nuclear.paleGold) : (Nuclear.gold, Nuclear.purple)
+        }
+    }
+
+    private static func jagged(start: CGPoint, end: CGPoint, segments: Int,
+                               chaos: CGFloat, rng: inout V64StormRNG) -> (Path, [CGPoint]) {
+        var path = Path()
+        path.move(to: start)
+        var points: [CGPoint] = [start]
+        let dx = end.x - start.x
+        let dy = end.y - start.y
+        let distance = max(CGFloat(1), hypot(dx, dy))
+        let normalX = -dy / distance
+        let normalY = dx / distance
+        for step in 1...segments {
+            let fraction = CGFloat(step) / CGFloat(segments)
+            let edgeFalloff = CGFloat(sin(Double.pi * Double(fraction)))
+            let offset = (rng.next() - 0.5) * 2.0 * chaos * edgeFalloff
+            let point = CGPoint(x: start.x + dx * fraction + normalX * offset,
+                                y: start.y + dy * fraction + normalY * offset)
+            path.addLine(to: point)
+            points.append(point)
+        }
+        return (path, points)
+    }
+
+    private static func stroke(_ path: Path, context: inout GraphicsContext,
+                               tint: Color, core: Color, strength: Double,
+                               epic: Bool, thin: Bool = false) {
+        let scale: CGFloat = thin ? 0.57 : 1.0
+        let power = max(0.0, min(1.0, strength))
+        guard power > 0.05 else { return }
+        // Multiple vector strokes create a colored plasma sheath and a sharp white core.
+        // No expensive blur or full-screen white strobe.
+        context.stroke(path, with: .color(tint.opacity(power * 0.13)),
+                       style: StrokeStyle(lineWidth: (epic ? 13.0 : 8.0) * scale, lineCap: .round, lineJoin: .round))
+        context.stroke(path, with: .color(tint.opacity(power * 0.44)),
+                       style: StrokeStyle(lineWidth: (epic ? 5.2 : 3.7) * scale, lineCap: .round, lineJoin: .round))
+        context.stroke(path, with: .color(core.opacity(power * 0.96)),
+                       style: StrokeStyle(lineWidth: (epic ? 1.65 : 1.25) * scale, lineCap: .round, lineJoin: .round))
+    }
+
+    static func draw(_ context: inout GraphicsContext, size: CGSize, time: TimeInterval,
+                     stage: Int, masteryCount: Int, dominantPath: String, epic: Bool) {
+        guard size.width > 20, size.height > 20 else { return }
+        let palette = colors(path: dominantPath, stage: stage)
+        let power = min(12, max(0, masteryCount))
+        let intensity = Double(0.71 + 0.032 * Double(min(4, stage)) + 0.014 * Double(power))
+        let count = min(epic ? 8 : 5, (epic ? 3 : 2) + min(stage, 4) + power / 4)
+        let regenerationRate = epic ? 3.6 : 2.4
+        let moment = Int64(floor(time * regenerationRate))
+        let drift = CGFloat(sin(time * 1.17))
+
+        // Light shafts at each side of the character. Branches move as the storm regenerates.
+        for index in 0..<count {
+            let seed = UInt64(bitPattern: moment &* 341873128712 &+ Int64(index) &* 132897987541)
+            var rng = V64StormRNG(seed: seed)
+            let isLeft = index % 2 == 0
+            let startX: CGFloat = isLeft ? 0.02 + rng.next() * 0.27 : 0.70 + rng.next() * 0.27
+            let endX: CGFloat = isLeft ? 0.17 + rng.next() * 0.33 : 0.50 + rng.next() * 0.31
+            let top: CGFloat = -0.03 + rng.next() * 0.48
+            let bottom: CGFloat = min(1.03, top + 0.35 + rng.next() * 0.50)
+            let sway = drift * (epic ? 0.022 : 0.013)
+            let start = CGPoint(x: (startX + sway) * size.width, y: top * size.height)
+            let end = CGPoint(x: (endX + sway) * size.width, y: bottom * size.height)
+            let (bolt, nodes) = jagged(start: start, end: end,
+                                      segments: epic ? 13 : 9,
+                                      chaos: min(size.width, size.height) * (epic ? 0.11 : 0.07), rng: &rng)
+            // Slow pulsation with local flicker only. No full-screen flashes.
+            let wave = sin(time * 2.0 * Double.pi * (0.72 + Double(index % 3) * 0.11) + Double(index) * 1.65)
+            let strength = intensity * (0.29 + 0.65 * pow(max(0.0, wave), 2.0))
+            stroke(bolt, context: &context, tint: palette.0, core: palette.1,
+                   strength: strength, epic: epic)
+
+            let branches = epic ? 2 : 1
+            for branchIndex in 0..<branches {
+                let base = 2 + Int(rng.next() * CGFloat(max(1, nodes.count - 5)))
+                let anchor = nodes[min(base, nodes.count - 2)]
+                let direction: CGFloat = isLeft ? 1.0 : -1.0
+                let reach = size.width * (0.075 + rng.next() * 0.14)
+                let tip = CGPoint(x: anchor.x + direction * reach,
+                                  y: anchor.y + size.height * (0.04 + rng.next() * 0.17))
+                let (branch, _) = jagged(start: anchor, end: tip,
+                                         segments: 4 + branchIndex, chaos: size.width * 0.045, rng: &rng)
+                stroke(branch, context: &context, tint: palette.0, core: palette.1,
+                       strength: strength * 0.76, epic: epic, thin: true)
+            }
+        }
+
+        // Small drifting sparks, not arbitrary flash overlays on the face.
+        let sparks = epic ? 18 : 9
+        for index in 0..<sparks {
+            let seed = UInt64(bitPattern: moment &* 982451653 &+ Int64(index) &* 104729)
+            var rng = V64StormRNG(seed: seed)
+            let x = (0.08 + rng.next() * 0.84) * size.width
+            let y0 = rng.next()
+            let speed = 0.014 + Double(rng.next()) * 0.055
+            let y = CGFloat((Double(y0) + time * speed).truncatingRemainder(dividingBy: 1.0)) * size.height
+            let radius = (epic ? 1.6 : 1.1) + rng.next() * (epic ? 1.6 : 1.0)
+            let spark = Path(ellipseIn: CGRect(x: x - radius, y: y - radius,
+                                              width: radius * 2, height: radius * 2))
+            context.fill(spark, with: .color(palette.1.opacity((0.18 + 0.38 * Double(rng.next())) * intensity)))
+        }
+    }
+}
+
 private struct NuclearHeroAura: View {
     let level: Int
     let effectsEnabled: Bool
     let stageOverride: NuclearStage?
     let minimumStage: Int
+    let masteryCount: Int
+    let dominantPath: String
+    @State private var stormIsVisible = false
+    @AppStorage("bilux.v64.stormIntensity") private var stormIntensity = "epic"
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     // V5.3.1 : on n'anime JAMAIS la taille du GeometryReader ou de la photo.
@@ -123,11 +286,14 @@ private struct NuclearHeroAura: View {
     @State private var incomingOpacity: Double = 1
     @State private var fadeTask: Task<Void, Never>? = nil
 
-    init(level: Int, effectsEnabled: Bool, stageOverride: NuclearStage? = nil, minimumStage: Int = 0) {
+    init(level: Int, effectsEnabled: Bool, stageOverride: NuclearStage? = nil, minimumStage: Int = 0,
+         masteryCount: Int = 0, dominantPath: String = "core") {
         self.level = level
         self.effectsEnabled = effectsEnabled
         self.stageOverride = stageOverride
         self.minimumStage = minimumStage
+        self.masteryCount = masteryCount
+        self.dominantPath = dominantPath
     }
 
     private var stage: NuclearStage { stageOverride ?? NuclearStage.current(level: level) }
@@ -186,6 +352,16 @@ private struct NuclearHeroAura: View {
                     .blendMode(.screen)
                     .allowsHitTesting(false)
 
+                // V6.4 : éclairs vectoriels réellement mouvants, sans bouger ni recadrer l'avatar.
+                // Contrôlés par le toggle existant + Réduire les animations d'iOS.
+                if animate && stormIsVisible {
+                    V64StormLightning(stage: stage.id, masteryCount: masteryCount,
+                                     dominantPath: dominantPath,
+                                     epic: stormIntensity != "balanced")
+                        .blendMode(.screen)
+                        .allowsHitTesting(false)
+                }
+
                 VStack {
                     HStack(spacing: 8) {
                         Image(systemName: lockedPreview ? "lock.fill" : stage.symbol)
@@ -210,7 +386,7 @@ private struct NuclearHeroAura: View {
             .clipped()
         }
         // Surtout PAS de .animation(repeatForever) sur le GeometryReader entier.
-        .onAppear { energized = animate }
+        .onAppear { energized = animate; stormIsVisible = true }
         .onChange(of: stage.id) { oldID, _ in
             changePortrait(from: oldID)
         }
@@ -222,7 +398,7 @@ private struct NuclearHeroAura: View {
                 incomingOpacity = 1
             }
         }
-        .onDisappear { fadeTask?.cancel() }
+        .onDisappear { fadeTask?.cancel(); stormIsVisible = false }
         .accessibilityLabel("Avatar BILUX : " + stage.name +
                             (lockedPreview ? ", verrouillé" : ", débloqué"))
     }
@@ -757,7 +933,10 @@ struct HomeScreen: View {
     private var heroPanel: some View {
         ZStack(alignment: .bottomLeading) {
             GeometryReader { geometry in
-                NuclearHeroAura(level: journal.heroLevel, effectsEnabled: effectsEnabled, stageOverride: homeStage, minimumStage: journal.unlockedStageIndex)
+                NuclearHeroAura(level: journal.heroLevel, effectsEnabled: effectsEnabled,
+                                stageOverride: homeStage, minimumStage: journal.unlockedStageIndex,
+                                masteryCount: V63MasterySnapshot.evaluate(journal.data).unlockedTotal,
+                                dominantPath: V64StormMastery.dominantPath(journal.data))
                     .frame(width: geometry.size.width, height: geometry.size.height)
                     .clipped()
             }
@@ -1092,6 +1271,7 @@ struct HealthScreen: View {
 
 struct AscensionScreen: View {
     @EnvironmentObject private var journal: BiluxStore
+    @AppStorage("bilux.v64.stormIntensity") private var stormIntensity = "epic"
     @State private var showingImporter = false
     @State private var showCodex = false
     @State private var showLegacy = false
@@ -1105,7 +1285,11 @@ struct AscensionScreen: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 15) {
                     GeometryReader { geometry in
-                        NuclearHeroAura(level: journal.heroLevel, effectsEnabled: effectsEnabled, stageOverride: NuclearStage.all[selectedStage], minimumStage: journal.unlockedStageIndex)
+                        NuclearHeroAura(level: journal.heroLevel, effectsEnabled: effectsEnabled,
+                                        stageOverride: NuclearStage.all[selectedStage],
+                                        minimumStage: journal.unlockedStageIndex,
+                                        masteryCount: V63MasterySnapshot.evaluate(journal.data).unlockedTotal,
+                                        dominantPath: V64StormMastery.dominantPath(journal.data))
                             .frame(width: geometry.size.width, height: geometry.size.height)
                             .clipped()
                     }
@@ -1267,6 +1451,16 @@ struct AscensionScreen: View {
                     SectionCaption(title: "Effets visuels")
                     NuclearCard {
                         Toggle("Animations nucléaires", isOn: $effectsEnabled).tint(Nuclear.gold)
+                        Text("TEMPÊTE ÉLECTRIQUE · V6.4")
+                            .font(.caption.bold()).foregroundStyle(Nuclear.gold)
+                        Picker("Intensité de l'orage", selection: $stormIntensity) {
+                            Text("Équilibré").tag("balanced")
+                            Text("Épique ⚡").tag("epic")
+                        }
+                        .pickerStyle(.segmented)
+                        .disabled(!effectsEnabled)
+                        Text("Arcs électriques mouvants, ramifications et étincelles : la voie de maîtrise dominante modifie leur couleur. Mode Épique activé par défaut. Aucun effet sur les XP.")
+                            .font(.caption2).foregroundStyle(Nuclear.muted)
                         Text("Désactive les effets animés pour économiser la batterie. Le réglage de réduction des animations d'iOS est respecté.")
                             .font(.caption2).foregroundStyle(Nuclear.muted)
                     }
@@ -1666,6 +1860,12 @@ private struct BILUXV57RankCinema: View {
                                center: .center, startRadius: 25, endRadius: 340)
                     .blendMode(.screen)
                     .allowsHitTesting(false)
+                if animated {
+                    V64StormLightning(stage: stage.id, masteryCount: 0,
+                                     dominantPath: "core", epic: true)
+                        .blendMode(.screen)
+                        .allowsHitTesting(false)
+                }
 
                 VStack(spacing: 12) {
                     Text("BILUX · ÉVEIL NUCLÉAIRE")
