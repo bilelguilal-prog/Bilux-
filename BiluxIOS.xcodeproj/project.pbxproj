@@ -181,7 +181,7 @@
 		B789567E655960B29BAF4905 /* Debug Widget */ = {isa = XCBuildConfiguration; buildSettings = {
         APPLICATION_EXTENSION_API_ONLY = YES;
         CODE_SIGN_STYLE = Automatic;
-        CURRENT_PROJECT_VERSION = 20;
+        CURRENT_PROJECT_VERSION = 21;
         GENERATE_INFOPLIST_FILE = NO;
         INFOPLIST_FILE = BiluxWatchWidget/Info.plist;
         MARKETING_VERSION = 1.0;
@@ -198,7 +198,7 @@
 		1164D6A9FE2F8D05FB2F5861 /* Release Widget */ = {isa = XCBuildConfiguration; buildSettings = {
         APPLICATION_EXTENSION_API_ONLY = YES;
         CODE_SIGN_STYLE = Automatic;
-        CURRENT_PROJECT_VERSION = 20;
+        CURRENT_PROJECT_VERSION = 21;
         GENERATE_INFOPLIST_FILE = NO;
         INFOPLIST_FILE = BiluxWatchWidget/Info.plist;
         MARKETING_VERSION = 1.0;
