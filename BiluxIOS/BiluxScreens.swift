@@ -1975,6 +1975,9 @@ private struct BILUXV58Codex: View {
                     }
                     .frame(height: 188)
                     .clipShape(RoundedRectangle(cornerRadius: 13))
+                    // V5.8.3 : portraits hors hit testing. Une image recadrée peut
+                    // bloquer la touche du dossier précédent avec sa zone invisible.
+                    .allowsHitTesting(false)
                     Text(boss.subtitle.uppercased())
                         .font(.system(size: 10, weight: .heavy)).tracking(1.3)
                         .foregroundStyle(boss.accent)
