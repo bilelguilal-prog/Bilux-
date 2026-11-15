@@ -1,5 +1,8 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import UIKit
+import Vision
+import CoreImage
 
 // BILUX V5.1 — nouveau langage visuel, sans modification du modèle de données.
 private enum Nuclear {
@@ -268,6 +271,305 @@ private enum V64StormRenderer {
     }
 }
 
+// MARK: - BILUX V6.5 · THUNDER DEPTH / PARALLAX LIGHTNING
+// This entire renderer is visual-only. No data writing, training or XP changes.
+// On-device Vision foreground lifting lets rear lightning disappear BEHIND the hero.
+
+private enum V65SubjectCutout {
+    private static let cache: NSCache<NSString, UIImage> = {
+        let object = NSCache<NSString, UIImage>()
+        object.totalCostLimit = 45 * 1024 * 1024
+        return object
+    }()
+
+    static func cached(_ asset: String) -> UIImage? {
+        cache.object(forKey: asset as NSString)
+    }
+
+    static func request(_ asset: String, completion: @escaping (UIImage?) -> Void) {
+        if let existing = cached(asset) {
+            DispatchQueue.main.async { completion(existing) }
+            return
+        }
+        DispatchQueue.global(qos: .utility).async {
+            var output: UIImage?
+            if #available(iOS 17.0, *), let cgImage = UIImage(named: asset)?.cgImage {
+                let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+                let request = VNGenerateForegroundInstanceMaskRequest()
+                do {
+                    try handler.perform([request])
+                    if let result = request.results?.first, !result.allInstances.isEmpty {
+                        // croppedToInstancesExtent:false is essential: keep exactly the
+                        // original artwork's geometry for the scaledToFill duplicate.
+                        let buffer = try result.generateMaskedImage(
+                            ofInstances: result.allInstances,
+                            from: handler,
+                            croppedToInstancesExtent: false)
+                        let image = CIImage(cvPixelBuffer: buffer)
+                        let context = CIContext(options: [.useSoftwareRenderer: false])
+                        if let visible = context.createCGImage(image, from: image.extent) {
+                            let lifted = UIImage(cgImage: visible)
+                            cache.setObject(lifted, forKey: asset as NSString,
+                                            cost: visible.bytesPerRow * visible.height)
+                            output = lifted
+                        }
+                    }
+                } catch {
+                    // Artwork with no detectable foreground: safe edge-only fallback.
+                }
+            }
+            DispatchQueue.main.async { completion(output) }
+        }
+    }
+}
+
+private enum V65StormPlane {
+    case back
+    case front
+}
+
+private struct V65DepthLightning: View {
+    let stage: Int
+    let masteryCount: Int
+    let dominantPath: String
+    let epic: Bool
+    let plane: V65StormPlane
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: epic ? 1.0 / 24.0 : 1.0 / 15.0)) { timeline in
+            Canvas(opaque: false, rendersAsynchronously: true) { context, size in
+                V65ThunderRenderer.draw(&context, size: size,
+                    time: timeline.date.timeIntervalSinceReferenceDate,
+                    stage: stage, masteryCount: masteryCount,
+                    dominantPath: dominantPath, epic: epic, plane: plane)
+            }
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+private enum V65ThunderRenderer {
+    private static func palette(_ path: String, stage: Int) -> (Color, Color) {
+        switch path {
+        case "force": return (Nuclear.gold, Color(red: 1, green: 0.98, blue: 0.82))
+        case "endurance": return (Color(red: 1, green: 0.48, blue: 0.13), Nuclear.paleGold)
+        case "regularity": return (Nuclear.purple, Color(red: 0.80, green: 0.88, blue: 1))
+        case "mastery": return (Color(red: 0.46, green: 0.72, blue: 1), Color.white)
+        default: return (stage >= 3 ? Nuclear.purple : Nuclear.gold,
+                         stage >= 3 ? Nuclear.paleGold : Nuclear.purple)
+        }
+    }
+
+    private static func jagged(from a: CGPoint, to b: CGPoint,
+                               count: Int, chaos: CGFloat, rng: inout V64StormRNG) -> [CGPoint] {
+        let dx = b.x - a.x
+        let dy = b.y - a.y
+        let distance = max(1, hypot(dx, dy))
+        let nx = -dy / distance
+        let ny = dx / distance
+        var points: [CGPoint] = [a]
+        for i in 1..<count {
+            let t = CGFloat(i) / CGFloat(count)
+            let jag = (rng.next() - 0.5) * 2 * chaos * sin(t * .pi)
+            points.append(CGPoint(x: a.x + dx * t + nx * jag,
+                                  y: a.y + dy * t + ny * jag))
+        }
+        points.append(b)
+        return points
+    }
+
+    private static func route(_ points: [CGPoint]) -> Path {
+        var p = Path()
+        guard let first = points.first else { return p }
+        p.move(to: first)
+        for point in points.dropFirst() { p.addLine(to: point) }
+        return p
+    }
+
+    private static func flash(_ path: Path, context: inout GraphicsContext,
+                              color: Color, core: Color, strength: Double,
+                              front: Bool, epic: Bool, branch: Bool = false) {
+        guard strength > 0.055 else { return }
+        let scale: CGFloat = branch ? 0.46 : (front ? 1.0 : 1.25)
+        let thick: CGFloat = epic ? 16.0 : 11.0
+        context.stroke(path, with: .color(color.opacity(strength * (front ? 0.24 : 0.16))),
+                       style: StrokeStyle(lineWidth: thick * scale, lineCap: .round, lineJoin: .round))
+        context.stroke(path, with: .color(color.opacity(strength * 0.73)),
+                       style: StrokeStyle(lineWidth: (epic ? 5.8 : 4.2) * scale,
+                                          lineCap: .round, lineJoin: .round))
+        context.stroke(path, with: .color(core.opacity(strength * (front ? 1.0 : 0.83))),
+                       style: StrokeStyle(lineWidth: (epic ? 2.05 : 1.5) * scale,
+                                          lineCap: .round, lineJoin: .round))
+    }
+
+    private static func point(_ x: CGFloat, _ y: CGFloat, _ size: CGSize) -> CGPoint {
+        CGPoint(x: x * size.width, y: y * size.height)
+    }
+
+    static func draw(_ context: inout GraphicsContext, size: CGSize, time: TimeInterval,
+                     stage: Int, masteryCount: Int, dominantPath: String,
+                     epic: Bool, plane: V65StormPlane) {
+        guard size.width > 35, size.height > 35 else { return }
+        let isFront = plane == .front
+        let colors = palette(dominantPath, stage: stage)
+        let progress = min(12, max(0, masteryCount))
+        // FEWER, bigger bolts; rear thunder is longer, foreground only crosses
+        // shoulders and reactor rather than scribbling over the character's face.
+        let count = isFront ? (epic ? 3 : 2) : (epic ? 5 : 3)
+        let cadence = epic ? 2.4 : 1.7
+        let magnitude = min(1.0, 0.77 + Double(stage) * 0.035 + Double(progress) * 0.008)
+        let sway = CGFloat(sin(time * (isFront ? 1.6 : 0.84)))
+
+        for index in 0..<count {
+            // Each discharge has its own short and irregular attack/restrike.
+            let offset = Double(index) * 0.71 + (isFront ? 0.24 : 0)
+            let elapsed = time * cadence + offset
+            let beat = floor(elapsed)
+            let phase = elapsed - beat
+            let impulse: Double
+            if phase < 0.10 { impulse = 1.0 }
+            else if phase < 0.16 { impulse = 0.21 }
+            else if phase < 0.23 { impulse = 0.74 }
+            else if phase < 0.31 { impulse = 0.18 }
+            else { impulse = 0.0 }
+            guard impulse > 0 else { continue }
+            let seed = Int64(beat) &* 16777619 &+ Int64(index) &* 741103597
+                &+ (isFront ? 977 : 231)
+            var rng = V64StormRNG(seed: UInt64(bitPattern: seed))
+            let fromLeft = index.isMultiple(of: 2)
+            let start: CGPoint
+            let end: CGPoint
+            if isFront {
+                // Front arcs orbit across the reactor / outer shoulders only.
+                start = point(fromLeft ? -0.10 : 1.10,
+                              0.66 + CGFloat(index % 2) * 0.19, size)
+                end = point((fromLeft ? 0.43 : 0.58) + sway * 0.016,
+                            0.72 + rng.next() * 0.20, size)
+            } else {
+                // Thunder originates in the storm BEHIND the silhouette.
+                start = point(fromLeft ? -0.09 : 1.09,
+                              -0.10 + rng.next() * 0.42, size)
+                end = point((fromLeft ? 0.57 : 0.42) + sway * 0.025,
+                            0.59 + rng.next() * 0.36, size)
+            }
+            let points = jagged(from: start, to: end,
+                                count: epic ? 18 : 13,
+                                chaos: min(size.width, size.height) * (isFront ? 0.09 : 0.14),
+                                rng: &rng)
+            let strength = magnitude * impulse * (isFront ? 0.82 : 1.0)
+            flash(route(points), context: &context,
+                  color: colors.0, core: colors.1, strength: strength,
+                  front: isFront, epic: epic)
+
+            for branchID in 0..<(epic ? 3 : 2) {
+                let count = max(4, points.count - 4)
+                let base = 2 + Int(rng.next() * CGFloat(count - 2))
+                let anchor = points[min(base, points.count - 2)]
+                let dx = (fromLeft ? 1.0 : -1.0) * (0.09 + rng.next() * 0.16)
+                let dy = 0.04 + rng.next() * 0.17
+                let tip = CGPoint(x: anchor.x + dx * size.width,
+                                  y: anchor.y + dy * size.height)
+                let branchPoints = jagged(from: anchor, to: tip,
+                                          count: 5 + branchID,
+                                          chaos: size.width * 0.045, rng: &rng)
+                flash(route(branchPoints), context: &context,
+                      color: colors.0, core: colors.1,
+                      strength: strength * 0.62,
+                      front: isFront, epic: epic, branch: true)
+            }
+        }
+
+        // Brief shockwave wrapping the lower torso: half behind and half in front.
+        // Not a permanent flat orbit/ring drawn over the face.
+        let waveTime = time * (epic ? 1.38 : 0.94)
+        let wavePhase = waveTime - floor(waveTime)
+        if wavePhase < 0.14 {
+            let seed = Int64(floor(waveTime)) &* 31337 &+ (isFront ? 17 : 11)
+            var rng = V64StormRNG(seed: UInt64(bitPattern: seed))
+            let center = point(0.50 + sway * 0.012, 0.82, size)
+            var orbit: [CGPoint] = []
+            for i in 0...14 {
+                let t = CGFloat(i) / 14
+                let angle = (isFront ? CGFloat(0.05) : CGFloat.pi) + t * .pi
+                let jitter = (rng.next() - 0.5) * size.width * 0.035
+                orbit.append(CGPoint(x: center.x + cos(angle) * (size.width * 0.42 + jitter),
+                                     y: center.y + sin(angle) * size.height * 0.105 + jitter * 0.2))
+            }
+            flash(route(orbit), context: &context, color: colors.0, core: colors.1,
+                  strength: magnitude * (isFront ? 0.54 : 0.30), front: isFront, epic: epic)
+        }
+    }
+}
+
+// Composite in ORIGINAL artwork coordinates; no movement, rescaling or crop of the hero.
+// Rear discharge -> Vision-cut hero -> rare foreground lightning.
+private struct V65DepthCompositing: View {
+    let artwork: String
+    let stage: Int
+    let masteryCount: Int
+    let dominantPath: String
+    let epic: Bool
+    let width: CGFloat
+    let height: CGFloat
+    @State private var visibleArtwork = ""
+    @State private var liftedHero: UIImage?
+
+    var body: some View {
+        ZStack {
+            V65DepthLightning(stage: stage, masteryCount: masteryCount,
+                              dominantPath: dominantPath, epic: epic, plane: .back)
+                .blur(radius: epic ? 1.8 : 2.8)
+                .blendMode(.screen)
+                .mask {
+                    if liftedHero != nil {
+                        Color.white
+                    } else {
+                        // Vision unavailable: keep background bolts on the OUTER
+                        // edges only, rather than drawing through the face.
+                        LinearGradient(stops: [
+                            .init(color: .white, location: 0),
+                            .init(color: .white, location: 0.13),
+                            .init(color: .clear, location: 0.38),
+                            .init(color: .clear, location: 0.62),
+                            .init(color: .white, location: 0.87),
+                            .init(color: .white, location: 1)
+                        ], startPoint: .leading, endPoint: .trailing)
+                    }
+                }
+
+            if let liftedHero {
+                Image(uiImage: liftedHero)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: width, height: height)
+                    .clipped()
+                    .accessibilityHidden(true)
+            }
+
+            V65DepthLightning(stage: stage, masteryCount: masteryCount,
+                              dominantPath: dominantPath, epic: epic, plane: .front)
+                .blendMode(.screen)
+        }
+        .frame(width: width, height: height)
+        .clipped()
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+        .onAppear { load(artwork) }
+        .onChange(of: artwork) { _, newAsset in load(newAsset) }
+    }
+
+    private func load(_ asset: String) {
+        visibleArtwork = asset
+        liftedHero = V65SubjectCutout.cached(asset)
+        guard liftedHero == nil else { return }
+        V65SubjectCutout.request(asset) { lifted in
+            guard visibleArtwork == asset else { return }
+            liftedHero = lifted
+        }
+    }
+}
+
 private struct NuclearHeroAura: View {
     let level: Int
     let effectsEnabled: Bool
@@ -352,14 +654,15 @@ private struct NuclearHeroAura: View {
                     .blendMode(.screen)
                     .allowsHitTesting(false)
 
-                // V6.4 : éclairs vectoriels réellement mouvants, sans bouger ni recadrer l'avatar.
-                // Contrôlés par le toggle existant + Réduire les animations d'iOS.
-                if animate && stormIsVisible {
-                    V64StormLightning(stage: stage.id, masteryCount: masteryCount,
-                                     dominantPath: dominantPath,
-                                     epic: stormIntensity != "balanced")
-                        .blendMode(.screen)
-                        .allowsHitTesting(false)
+                // V6.5 : foudre arrière OCCULTÉE par le personnage détouré automatiquement
+                // (Vision, sur l'iPhone), puis décharges rares au premier plan.
+                // Aucune animation de la taille/cadre du portrait et aucun recalcul d'XP.
+                if animate && stormIsVisible && outgoingArtwork == nil {
+                    V65DepthCompositing(artwork: stage.artwork, stage: stage.id,
+                                        masteryCount: masteryCount,
+                                        dominantPath: dominantPath,
+                                        epic: stormIntensity != "balanced",
+                                        width: width, height: height)
                 }
 
                 VStack {
@@ -1451,7 +1754,7 @@ struct AscensionScreen: View {
                     SectionCaption(title: "Effets visuels")
                     NuclearCard {
                         Toggle("Animations nucléaires", isOn: $effectsEnabled).tint(Nuclear.gold)
-                        Text("TEMPÊTE ÉLECTRIQUE · V6.4")
+                        Text("THUNDER DEPTH · V6.5")
                             .font(.caption.bold()).foregroundStyle(Nuclear.gold)
                         Picker("Intensité de l'orage", selection: $stormIntensity) {
                             Text("Équilibré").tag("balanced")
@@ -1459,7 +1762,7 @@ struct AscensionScreen: View {
                         }
                         .pickerStyle(.segmented)
                         .disabled(!effectsEnabled)
-                        Text("Arcs électriques mouvants, ramifications et étincelles : la voie de maîtrise dominante modifie leur couleur. Mode Épique activé par défaut. Aucun effet sur les XP.")
+                        Text("Foudre d'orage en profondeur : derrière la silhouette, autour du réacteur, puis quelques décharges devant. Détourage automatique sur l'iPhone avec Apple Vision (si détectable), sans transfert de photo. Mode Épique par défaut. Aucun effet sur les XP.")
                             .font(.caption2).foregroundStyle(Nuclear.muted)
                         Text("Désactive les effets animés pour économiser la batterie. Le réglage de réduction des animations d'iOS est respecté.")
                             .font(.caption2).foregroundStyle(Nuclear.muted)
@@ -1861,10 +2164,11 @@ private struct BILUXV57RankCinema: View {
                     .blendMode(.screen)
                     .allowsHitTesting(false)
                 if animated {
-                    V64StormLightning(stage: stage.id, masteryCount: 0,
-                                     dominantPath: "core", epic: true)
-                        .blendMode(.screen)
-                        .allowsHitTesting(false)
+                    V65DepthCompositing(artwork: stage.artwork, stage: stage.id,
+                                        masteryCount: 0, dominantPath: "core",
+                                        epic: true,
+                                        width: geometry.size.width,
+                                        height: geometry.size.height)
                 }
 
                 VStack(spacing: 12) {
