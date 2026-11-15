@@ -58,7 +58,10 @@ final class WatchBridge: NSObject, ObservableObject, WCSessionDelegate {
     // V6.1 : envoi idempotent après sauvegarde effective de HKWorkout.
     // UUID Apple Santé = UUID du journal BILUX ; WCSession peut rejouer le transfert.
     func finishLiveWorkout(start: Date, elapsedMinutes: Int, activity: String,
-                           workoutID: UUID, activeKcal: Double?) {
+                           workoutID: UUID, activeKcal: Double?,
+                           averageBPM: Int?, peakBPM: Int?,
+                           zoneSeconds: [Int], referenceMaxBPM: Int,
+                           sampleCount: Int) {
         guard (1...240).contains(elapsedMinutes),
               WCSession.isSupported() else {
             feedback = "Séance Santé sauvegardée, mais transfert BILUX indisponible."
@@ -73,6 +76,11 @@ final class WatchBridge: NSObject, ObservableObject, WCSessionDelegate {
         if let activeKcal, activeKcal.isFinite {
             event["activeKcal"] = max(0, activeKcal)
         }
+        if let averageBPM { event["averageBPM"] = averageBPM }
+        if let peakBPM { event["peakBPM"] = peakBPM }
+        event["zoneSeconds"] = zoneSeconds
+        event["referenceMaxBPM"] = referenceMaxBPM
+        event["sampleCount"] = sampleCount
         var queued = UserDefaults.standard.array(forKey: pendingKey) as? [[String: Any]] ?? []
         if !queued.contains(where: { ($0["id"] as? String) == workoutID.uuidString }) {
             queued.append(event)

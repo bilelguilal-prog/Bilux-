@@ -41,7 +41,11 @@ final class BiluxStore: ObservableObject {
             feedback = "Cette séance n'existe plus dans le journal."
             return
         }
-        data.workouts[index] = session
+        var updated = session
+        if updated.liveReport == nil {
+            updated.liveReport = data.workouts[index].liveReport
+        }
+        data.workouts[index] = updated
         for exercise in session.exercises { registerExerciseName(exercise.name, saveImmediately: false) }
         save()
     }

@@ -853,6 +853,7 @@ struct SportScreen: View {
     @EnvironmentObject private var journal: BiluxStore
     @State private var showNew = false
     @State private var editingWorkout: WorkoutSession?
+    @State private var selectedLiveWorkout: WorkoutSession?
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -961,6 +962,14 @@ struct SportScreen: View {
                             }
                             if let rpe = workout.rpe { Text("Effort perçu : \(rpe)/10").font(.caption) }
                             if !workout.notes.isEmpty { Text(workout.notes).font(.caption) }
+                            if workout.liveReport != nil {
+                                Button { selectedLiveWorkout = workout } label: {
+                                    Label("DÉBRIEF NUCLEAR LIVE", systemImage: "chart.bar.fill")
+                                        .font(.caption.bold()).frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .tint(Nuclear.purple)
+                            }
                             HStack(spacing: 16) {
                                 Button { editingWorkout = workout } label: {
                                     Label("Modifier", systemImage: "pencil").font(.caption)
@@ -977,6 +986,9 @@ struct SportScreen: View {
             .navigationTitle("Entraînement").modifier(PageBackground())
             .sheet(isPresented: $showNew) { NewWorkoutScreen() }
             .sheet(item: $editingWorkout) { workout in NewWorkoutScreen(session: workout) }
+            .sheet(item: $selectedLiveWorkout) { workout in
+                V62NuclearDebrief(workout: workout)
+            }
         }
     }
 }
@@ -2549,6 +2561,92 @@ private struct BILUXV59LegacyProfile: View {
                         .font(.caption2.bold()).foregroundStyle(victories > 0 ? Nuclear.paleGold : Nuclear.muted)
                 }
                 Spacer(minLength: 0)
+            }
+        }
+    }
+}
+
+// MARK: - BILUX V6.2 — NUCLEAR COMMAND · Débrief post-entraînement
+private struct V62NuclearDebrief: View {
+    let workout: WorkoutSession
+    @Environment(\.dismiss) private var dismiss
+    private var report: NuclearLiveReport? { workout.liveReport }
+    private let captions = ["Récupération", "Endurance douce", "Soutenu", "Intense", "Très intense"]
+
+    private func metric(_ label: String, _ value: String, symbol: String) -> some View {
+        VStack(spacing: 6) {
+            Image(systemName: symbol).foregroundStyle(Nuclear.gold)
+            Text(value).font(.system(size: 18, weight: .black, design: .rounded))
+                .foregroundStyle(.white).minimumScaleFactor(0.65).lineLimit(1)
+            Text(label).font(.system(size: 10)).foregroundStyle(Nuclear.muted)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(10)
+        .background(Nuclear.panel, in: RoundedRectangle(cornerRadius: 13))
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 15) {
+                    NuclearCard {
+                        Text("NUCLEAR COMMAND · RAPPORT DE COMBAT")
+                            .font(.caption.bold()).foregroundStyle(Nuclear.gold).tracking(1)
+                        Text(workout.activity.uppercased())
+                            .font(.system(size: 24, weight: .black, design: .rounded))
+                        Text(workout.date.formatted(date: .abbreviated, time: .shortened))
+                            .font(.caption).foregroundStyle(Nuclear.muted)
+                        HStack(spacing: 6) {
+                            metric("Durée", "\(workout.durationMinutes) min", symbol: "timer")
+                            metric("Kcal actives", report?.activeKcal.map { "\(Int($0.rounded()))" } ?? "—", symbol: "flame.fill")
+                        }
+                        HStack(spacing: 6) {
+                            metric("FC moyenne*", report?.averageBPM.map { String($0) } ?? "—", symbol: "heart.fill")
+                            metric("Pic observé*", report?.peakBPM.map { String($0) } ?? "—", symbol: "waveform.path.ecg")
+                        }
+                    }
+                    SectionCaption(title: "Répartition des 5 zones")
+                    NuclearCard {
+                        if let report {
+                            let totals = report.zoneSeconds.count == 5 ? report.zoneSeconds : [0, 0, 0, 0, 0]
+                            let maxSeconds = max(1, totals.max() ?? 0)
+                            ForEach(0..<5, id: \.self) { index in
+                                HStack(spacing: 8) {
+                                    Text("Z\(index + 1)")
+                                        .font(.caption.bold()).foregroundStyle(Nuclear.gold)
+                                        .frame(width: 27, alignment: .leading)
+                                    GeometryReader { geometry in
+                                        ZStack(alignment: .leading) {
+                                            Capsule().fill(Nuclear.purple.opacity(0.15))
+                                            Capsule()
+                                                .fill(index >= 3 ? Nuclear.gold : Nuclear.purple)
+                                                .frame(width: max(2, geometry.size.width * CGFloat(totals[index]) / CGFloat(maxSeconds)))
+                                        }
+                                    }
+                                    .frame(height: 9)
+                                    Text("\(totals[index]) s")
+                                        .font(.caption.monospacedDigit()).foregroundStyle(Nuclear.paleGold)
+                                        .frame(width: 45, alignment: .trailing)
+                                }
+                                Text(captions[index]).font(.system(size: 10)).foregroundStyle(Nuclear.muted)
+                            }
+                            Text("FC max de référence : \(report.referenceMaxBPM) bpm · \(report.sampleCount) échantillons observés")
+                                .font(.caption2).foregroundStyle(Nuclear.muted)
+                        }
+                    }
+                    Text("* Moyenne et pic des lectures observées pendant Nuclear Live, non une mesure diagnostique. Les durées en zone sont approximatives : pauses et trous de capteur ne sont pas estimés. Repères indicatifs uniquement.")
+                        .font(.caption2).foregroundStyle(Nuclear.muted)
+                    Text("Aucun XP supplémentaire : cette séance compte déjà une seule fois dans ton journal.")
+                        .font(.caption2).foregroundStyle(Nuclear.paleGold)
+                }
+                .padding(16)
+            }
+            .background(Nuclear.background.ignoresSafeArea())
+            .navigationTitle("Débrief Nuclear Live")
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Fermer") { dismiss() }
+                }
             }
         }
     }

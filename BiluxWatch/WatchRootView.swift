@@ -756,6 +756,23 @@ struct V54WatchWorkoutView: View {
 // La session reste gérée par un singleton même si l'utilisateur change de page.
 import HealthKit
 import Combine
+import WatchKit
+
+// Zones visuelles indicatives calculées en % de FC max choisie sur la montre.
+// Ne prescrivent ni seuil médical ni intensité d'entraînement.
+private enum V62CardiacZone {
+    static func index(_ bpm: Double, maxBPM: Int) -> Int {
+        let fraction = bpm / Double(max(120, min(220, maxBPM)))
+        switch fraction {
+        case ..<0.60: return 1
+        case ..<0.70: return 2
+        case ..<0.80: return 3
+        case ..<0.90: return 4
+        default: return 5
+        }
+    }
+}
+
 
 private enum V61LiveMode: String, CaseIterable, Identifiable {
     case strength = "Musculation"
@@ -795,6 +812,17 @@ private final class V61NuclearLive: NSObject, ObservableObject, HKWorkoutSession
     @Published private(set) var activeKcal: Double?
     @Published private(set) var activityName = "Musculation"
     @Published private(set) var message: String?
+    @Published private(set) var cardiacZone: Int?
+    @Published private(set) var zoneSeconds: [Int] = [0, 0, 0, 0, 0]
+    @Published private(set) var averageBPM: Int?
+    @Published private(set) var peakBPM: Int?
+    @Published private(set) var maxReferenceBPM = 190
+    private var sumBPM: Double = 0
+    private var heartSamples = 0
+    private var lastHeartAt: Date?
+    private var lastZone: Int?
+    private var hapticEnabled = false
+    private var lastHapticAt: Date?
 
     private let store = HKHealthStore()
     private var session: HKWorkoutSession?
@@ -815,7 +843,8 @@ private final class V61NuclearLive: NSObject, ObservableObject, HKWorkoutSession
         return max(0, Int(end.timeIntervalSince(begunAt) - pausedTotal))
     }
 
-    func start(mode: V61LiveMode, bridge: WatchBridge) async {
+    func start(mode: V61LiveMode, bridge: WatchBridge,
+               referenceMaxBPM: Int, enableHaptics: Bool) async {
         guard !inProgress else { return }
         guard HKHealthStore.isHealthDataAvailable() else {
             phase = .failed
@@ -846,6 +875,17 @@ private final class V61NuclearLive: NSObject, ObservableObject, HKWorkoutSession
             activityName = mode.rawValue
             bpm = nil
             activeKcal = nil
+            maxReferenceBPM = max(120, min(220, referenceMaxBPM))
+            hapticEnabled = enableHaptics
+            cardiacZone = nil
+            zoneSeconds = [0, 0, 0, 0, 0]
+            sumBPM = 0
+            heartSamples = 0
+            averageBPM = nil
+            peakBPM = nil
+            lastHeartAt = nil
+            lastZone = nil
+            lastHapticAt = nil
             pausedAt = nil
             pausedTotal = 0
             didFinish = false
@@ -875,11 +915,13 @@ private final class V61NuclearLive: NSObject, ObservableObject, HKWorkoutSession
         switch phase {
         case .running:
             pausedAt = Date()
+            lastHeartAt = nil // Ne jamais comptabiliser de durée dans les zones pendant la pause.
             session?.pause()
             phase = .paused
         case .paused:
             if let pausedAt { pausedTotal += max(0, Date().timeIntervalSince(pausedAt)) }
             pausedAt = nil
+            lastHeartAt = nil
             session?.resume()
             phase = .running
         default: break
@@ -925,7 +967,11 @@ private final class V61NuclearLive: NSObject, ObservableObject, HKWorkoutSession
                     self.bridge?.finishLiveWorkout(
                         start: workout.startDate, elapsedMinutes: minutes,
                         activity: self.activityName, workoutID: workout.uuid,
-                        activeKcal: self.activeKcal
+                        activeKcal: self.activeKcal,
+                        averageBPM: self.averageBPM, peakBPM: self.peakBPM,
+                        zoneSeconds: self.zoneSeconds,
+                        referenceMaxBPM: self.maxReferenceBPM,
+                        sampleCount: self.heartSamples
                     )
                     self.clearReferences()
                     self.phase = .saved
@@ -966,12 +1012,35 @@ private final class V61NuclearLive: NSObject, ObservableObject, HKWorkoutSession
         message = text
     }
 
-    private func updateMetrics() {
+    private func updateMetrics(heartUpdated: Bool) {
         guard let builder else { return }
-        if let heartType = HKObjectType.quantityType(forIdentifier: .heartRate),
+        if heartUpdated,
+           let heartType = HKObjectType.quantityType(forIdentifier: .heartRate),
            let quantity = builder.statistics(for: heartType)?.mostRecentQuantity() {
             let rate = quantity.doubleValue(for: HKUnit.count().unitDivided(by: .minute()))
-            if rate.isFinite && rate > 0 { bpm = rate }
+            if rate.isFinite && (35...240).contains(rate), phase == .running {
+                let now = Date()
+                let nextZone = V62CardiacZone.index(rate, maxBPM: maxReferenceBPM)
+                if let lastHeartAt, let lastZone, (1...5).contains(lastZone) {
+                    let gap = now.timeIntervalSince(lastHeartAt)
+                    // Ne pas inventer des durées pendant les trous de capteur (>15 s).
+                    if gap > 0 && gap <= 15 { zoneSeconds[lastZone - 1] += Int(gap.rounded()) }
+                }
+                let old = cardiacZone
+                cardiacZone = nextZone
+                if hapticEnabled, let old, old != nextZone,
+                   now.timeIntervalSince(lastHapticAt ?? .distantPast) >= 30 {
+                    WKInterfaceDevice.current().play(.click)
+                    lastHapticAt = now
+                }
+                lastHeartAt = now
+                lastZone = nextZone
+                bpm = rate
+                heartSamples += 1
+                sumBPM += rate
+                averageBPM = Int((sumBPM / Double(heartSamples)).rounded())
+                peakBPM = max(peakBPM ?? 0, Int(rate.rounded()))
+            }
         }
         if let energyType = HKObjectType.quantityType(forIdentifier: .activeEnergyBurned),
            let quantity = builder.statistics(for: energyType)?.sumQuantity() {
@@ -994,7 +1063,12 @@ private final class V61NuclearLive: NSObject, ObservableObject, HKWorkoutSession
     }
     nonisolated func workoutBuilder(_ workoutBuilder: HKLiveWorkoutBuilder,
                                      didCollectDataOf collectedTypes: Set<HKSampleType>) {
-        Task { @MainActor in self.updateMetrics() }
+        // Les calories peuvent changer sans nouvel échantillon cardiaque : ne pas
+        // compter de durée en zone si seul le flux énergétique a été actualisé.
+        let heartUpdated = collectedTypes.contains { sample in
+            sample.identifier == HKQuantityTypeIdentifier.heartRate.rawValue
+        }
+        Task { @MainActor in self.updateMetrics(heartUpdated: heartUpdated) }
     }
     nonisolated func workoutBuilderDidCollectEvent(_ workoutBuilder: HKLiveWorkoutBuilder) {}
 }
@@ -1005,6 +1079,8 @@ private struct V61LiveWorkoutView: View {
     @StateObject private var live = V61NuclearLive.shared
     @State private var selectedMode: V61LiveMode = .strength
     @State private var confirmCancel = false
+    @AppStorage("bilux.watch.live.maxReferenceBPM") private var maxReferenceBPM = 190
+    @AppStorage("bilux.watch.live.zoneHaptics") private var zoneHaptics = false
 
     private func clock(_ seconds: Int) -> String {
         String(format: "%02d:%02d:%02d", seconds / 3600, (seconds / 60) % 60, seconds % 60)
@@ -1013,7 +1089,7 @@ private struct V61LiveWorkoutView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 9) {
-                V54ReactorTitle(text: "NUCLEAR LIVE · V6.1", symbol: "heart.fill")
+                V54ReactorTitle(text: "NUCLEAR COMMAND · V6.2", symbol: "heart.fill")
                 if !live.inProgress {
                     V54ReactorCard(accent: V54ReactorTheme.purple) {
                         Label("CAPTEURS EN DIRECT", systemImage: "waveform.path.ecg")
@@ -1021,6 +1097,17 @@ private struct V61LiveWorkoutView: View {
                             .foregroundStyle(V54ReactorTheme.paleGold)
                         Text("La Watch mesure le pouls et les calories. La séance sera aussi enregistrée dans Apple Santé.")
                             .font(.system(size: 10)).foregroundStyle(V54ReactorTheme.secondary)
+                    }
+                    V54ReactorCard(accent: V54ReactorTheme.purple) {
+                        Stepper(value: $maxReferenceBPM, in: 120...220, step: 5) {
+                            Text("FC max de référence : \(maxReferenceBPM) bpm")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(V54ReactorTheme.paleGold)
+                        }
+                        Toggle("Vibration au changement de zone", isOn: $zoneHaptics)
+                            .font(.system(size: 10))
+                        Text("Zones indicatives selon ce repère, sans prescription d'intensité.")
+                            .font(.system(size: 9)).foregroundStyle(V54ReactorTheme.secondary)
                     }
                     ForEach(V61LiveMode.allCases) { mode in
                         Button { selectedMode = mode } label: {
@@ -1035,7 +1122,11 @@ private struct V61LiveWorkoutView: View {
                         .tint(selectedMode == mode ? V54ReactorTheme.gold : V54ReactorTheme.purple)
                     }
                     Button {
-                        Task { await live.start(mode: selectedMode, bridge: bridge) }
+                        Task {
+                            await live.start(mode: selectedMode, bridge: bridge,
+                                             referenceMaxBPM: maxReferenceBPM,
+                                             enableHaptics: zoneHaptics)
+                        }
                     } label: {
                         Label("DÉMARRER LIVE", systemImage: "play.fill")
                             .font(.system(size: 12, weight: .heavy))
@@ -1068,6 +1159,26 @@ private struct V61LiveWorkoutView: View {
                                     .font(.title3.bold()).monospacedDigit()
                             }
                         }
+                    }
+                    V54ReactorCard(accent: V54ReactorTheme.purple) {
+                        HStack {
+                            Label("ZONES CARDIAQUES", systemImage: "waveform.path.ecg")
+                                .font(.system(size: 10, weight: .heavy))
+                                .foregroundStyle(V54ReactorTheme.paleGold)
+                            Spacer(minLength: 1)
+                            Text(live.cardiacZone.map { "Z\($0)" } ?? "—")
+                                .font(.system(size: 15, weight: .black))
+                                .foregroundStyle(V54ReactorTheme.gold)
+                        }
+                        HStack(spacing: 3) {
+                            ForEach(1...5, id: \.self) { z in
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(live.cardiacZone == z ? V54ReactorTheme.gold : V54ReactorTheme.purple.opacity(0.25))
+                                    .frame(height: live.cardiacZone == z ? 12 : 6)
+                            }
+                        }
+                        Text("Basées sur \(live.maxReferenceBPM) bpm · repères indicatifs")
+                            .font(.system(size: 9)).foregroundStyle(V54ReactorTheme.secondary)
                     }
                     if live.phase == .paused {
                         Label("SÉANCE EN PAUSE", systemImage: "pause.circle.fill")

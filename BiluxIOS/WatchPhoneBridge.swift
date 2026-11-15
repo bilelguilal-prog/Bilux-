@@ -103,11 +103,24 @@ final class WatchPhoneBridge: NSObject, WCSessionDelegate {
         } else {
             note = "Chronométrée dans BILUX Watch (sans enregistrement HealthKit)"
         }
-        journal.add(WorkoutSession(
+        var entry = WorkoutSession(
             id: id, date: Date(timeIntervalSince1970: startedAt),
             activity: activity, durationMinutes: duration,
             notes: note, exercises: []
-        ))
+        )
+        if isLive {
+            let count = max(0, min(25_000, message["sampleCount"] as? Int ?? 0))
+            let mean = (message["averageBPM"] as? Int).flatMap { (35...240).contains($0) ? $0 : nil }
+            let peak = (message["peakBPM"] as? Int).flatMap { (35...240).contains($0) ? $0 : nil }
+            let calorie = (message["activeKcal"] as? Double).flatMap { $0.isFinite && (0...20_000).contains($0) ? $0 : nil }
+            let raw = message["zoneSeconds"] as? [Int] ?? []
+            let zones = raw.count == 5 && raw.allSatisfy({ (0...(duration * 60)).contains($0) }) && raw.reduce(0, +) <= duration * 60 + 60 ? raw : [0, 0, 0, 0, 0]
+            let ref = max(120, min(220, message["referenceMaxBPM"] as? Int ?? 190))
+            entry.liveReport = NuclearLiveReport(averageBPM: mean, peakBPM: peak,
+                                                  activeKcal: calorie, zoneSeconds: zones,
+                                                  referenceMaxBPM: ref, sampleCount: count)
+        }
+        journal.add(entry)
     }
 
     nonisolated func session(_ session: WCSession, activationDidCompleteWith state: WCSessionActivationState, error: Error?) {

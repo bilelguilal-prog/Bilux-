@@ -19,10 +19,22 @@ struct WorkoutSession: Codable, Identifiable {
     var notes: String
     var rpe: Int? = nil
     var exercises: [WorkoutExercise]
+    // Optionnel : les JSON historiques restent décodables, sans migration d'XP.
+    var liveReport: NuclearLiveReport? = nil
     var volume: Double { exercises.reduce(0) { total, exercise in
         total + exercise.sets.reduce(0) { $0 + Double($1.reps) * $1.weight }
     }}
 }
+// BILUX V6.2 : observations de Nuclear Live, pas une mesure médicale ni une récompense RPG.
+struct NuclearLiveReport: Codable, Equatable {
+    var averageBPM: Int?
+    var peakBPM: Int?
+    var activeKcal: Double?
+    var zoneSeconds: [Int]
+    var referenceMaxBPM: Int
+    var sampleCount: Int
+}
+
 struct ManualMeal: Codable, Identifiable {
     var id: UUID = UUID()
     var date: Date = .now
