@@ -285,3 +285,98 @@ struct BILUXV59Loadout: Codable {
     var auraID: String = "core"
     var crestID: String = "core"
 }
+
+// MARK: - BILUX V6.3 · NUCLEAR MASTERY
+// Cosmetic-only milestones computed from existing workouts. This never writes XP or extra sessions.
+// Values describe JOURNAL ACTIVITY, never an objective assessment of physical capability.
+struct V63MasteryNode: Identifiable {
+    let id: String
+    let title: String
+    let detail: String
+    let icon: String
+    let current: Int
+    let goal: Int
+
+    var achieved: Bool { current >= goal }
+    var progress: Double { min(1.0, Double(max(0, current)) / Double(max(1, goal))) }
+    var remaining: Int { max(0, goal - current) }
+}
+
+struct V63MasteryBranch: Identifiable {
+    let id: String
+    let title: String
+    let icon: String
+    let subtitle: String
+    let current: Int
+    let ultimateTarget: Int
+    let unit: String
+    let nodes: [V63MasteryNode]
+
+    var levelPercent: Int {
+        min(100, Int((Double(max(0, current)) / Double(max(1, ultimateTarget)) * 100.0).rounded()))
+    }
+    var unlockedCount: Int { nodes.filter(\.achieved).count }
+    var next: V63MasteryNode? { nodes.first(where: { !$0.achieved }) }
+}
+
+struct V63MasterySnapshot {
+    let sessionCount: Int
+    let strengthSessions: Int
+    let totalMinutes: Int
+    let trainedWeeks: Int
+    let uniqueExerciseCount: Int
+
+    // No daily streaks: rest is never punished. Weeks are cumulative and never reset.
+    static func evaluate(_ data: BiluxData, now: Date = .now, calendar: Calendar = .current) -> V63MasterySnapshot {
+        let valid = data.workouts.filter { $0.date <= now && $0.durationMinutes >= 1 }
+        let strength = valid.filter { workout in
+            let name = workout.activity.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "fr_FR"))
+            return name.contains("musculation") || name.contains("strength") || name.contains("force") || name.contains("poids")
+        }.count
+        // Clamp each session to avoid corrupted/imported durations generating implausible stats.
+        let minutes = valid.reduce(0) { $0 + min(1440, max(0, $1.durationMinutes)) }
+        let eligibleWeeks: Set<Date> = Set(valid.filter { $0.durationMinutes >= 10 }.compactMap {
+            calendar.dateInterval(of: .weekOfYear, for: $0.date)?.start
+        })
+        let names: Set<String> = Set(valid.flatMap(\.exercises).map {
+            $0.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "fr_FR"))
+        }.filter { !$0.isEmpty })
+        return .init(sessionCount: valid.count, strengthSessions: strength, totalMinutes: minutes,
+                     trainedWeeks: eligibleWeeks.count, uniqueExerciseCount: names.count)
+    }
+
+    var branches: [V63MasteryBranch] {
+        [
+            .init(id: "force", title: "FORCE", icon: "bolt.shield.fill",
+                  subtitle: "Séances de musculation consignées", current: strengthSessions, ultimateTarget: 60,
+                  unit: "séances de force", nodes: [
+                    .init(id: "force1", title: "ÉTINCELLE DU TITAN", detail: "Consigner 4 séances de musculation.", icon: "bolt.fill", current: strengthSessions, goal: 4),
+                    .init(id: "force2", title: "ARMURE DU RÉACTEUR", detail: "Consigner 20 séances de musculation.", icon: "shield.fill", current: strengthSessions, goal: 20),
+                    .init(id: "force3", title: "FORGE LÉGENDAIRE", detail: "Consigner 60 séances de musculation.", icon: "crown.fill", current: strengthSessions, goal: 60)
+                  ]),
+            .init(id: "endurance", title: "ENDURANCE", icon: "flame.fill",
+                  subtitle: "Minutes d'entraînement consignées", current: totalMinutes, ultimateTarget: 6000,
+                  unit: "minutes enregistrées", nodes: [
+                    .init(id: "endurance1", title: "SOUFFLE DU SURVIVANT", detail: "Cumuler 360 minutes d'entraînement.", icon: "wind", current: totalMinutes, goal: 360),
+                    .init(id: "endurance2", title: "RÉACTEUR CONSTANT", detail: "Cumuler 1 800 minutes d'entraînement.", icon: "flame.fill", current: totalMinutes, goal: 1800),
+                    .init(id: "endurance3", title: "FLAMME ÉTERNELLE", detail: "Cumuler 6 000 minutes d'entraînement.", icon: "sun.max.fill", current: totalMinutes, goal: 6000)
+                  ]),
+            .init(id: "regularity", title: "RÉGULARITÉ", icon: "calendar.badge.checkmark",
+                  subtitle: "Semaines distinctes avec une séance d'au moins 10 min", current: trainedWeeks,
+                  ultimateTarget: 24, unit: "semaines actives", nodes: [
+                    .init(id: "regularity1", title: "PREMIER SERMENT", detail: "Enregistrer une activité sur 2 semaines différentes.", icon: "checkmark.seal.fill", current: trainedWeeks, goal: 2),
+                    .init(id: "regularity2", title: "DISCIPLINE DU NOYAU", detail: "Enregistrer une activité sur 8 semaines différentes.", icon: "shield.lefthalf.filled", current: trainedWeeks, goal: 8),
+                    .init(id: "regularity3", title: "VOIE DU VÉTÉRAN", detail: "Enregistrer une activité sur 24 semaines différentes.", icon: "star.fill", current: trainedWeeks, goal: 24)
+                  ]),
+            .init(id: "mastery", title: "MAÎTRISE", icon: "sparkles",
+                  subtitle: "Exercices distincts consignés", current: uniqueExerciseCount, ultimateTarget: 30,
+                  unit: "exercices différents", nodes: [
+                    .init(id: "mastery1", title: "APPRENTI DU CODEX", detail: "Consigner 4 exercices différents.", icon: "book.fill", current: uniqueExerciseCount, goal: 4),
+                    .init(id: "mastery2", title: "ARCHITECTE NUCLÉAIRE", detail: "Consigner 12 exercices différents.", icon: "atom", current: uniqueExerciseCount, goal: 12),
+                    .init(id: "mastery3", title: "MAÎTRE DE L'HÉRITAGE", detail: "Consigner 30 exercices différents.", icon: "crown.fill", current: uniqueExerciseCount, goal: 30)
+                  ])
+        ]
+    }
+    var unlockedTotal: Int { branches.reduce(0) { $0 + $1.unlockedCount } }
+}

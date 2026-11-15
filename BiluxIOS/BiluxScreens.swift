@@ -2363,6 +2363,7 @@ private struct BILUXV59LegacyProfile: View {
                 VStack(alignment: .leading, spacing: 20) {
                     profileHeader
                     rebirthCharacterSheet
+                    masteryEntry
                     SectionCaption(title: "Titres de légende")
                     Text("Équipe un titre déjà acquis dans la Salle des trophées. Aucun bonus d'XP n'est ajouté.")
                         .font(.caption).foregroundStyle(Nuclear.muted)
@@ -2417,6 +2418,32 @@ private struct BILUXV59LegacyProfile: View {
     }
 
     // REBIRTH : des statistiques calculées à partir du journal, jamais des XP bonus.
+    // V6.3 : entrée stable vers un arbre en lecture seule et calculé localement.
+    private var masteryEntry: some View {
+        NuclearCard {
+            HStack(spacing: 10) {
+                Image(systemName: "point.3.connected.trianglepath.dotted")
+                    .font(.title2).foregroundStyle(Nuclear.purple)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("NUCLEAR MASTERY · V6.3")
+                        .font(.caption.bold()).tracking(1).foregroundStyle(Nuclear.gold)
+                    Text("4 caractéristiques · 12 capacités évolutives")
+                        .font(.caption2).foregroundStyle(Nuclear.muted)
+                }
+            }
+            NavigationLink {
+                V63NuclearMasteryView().environmentObject(journal)
+            } label: {
+                Label("OUVRIR L'ARBRE DE MAÎTRISE", systemImage: "arrow.up.right.circle.fill")
+                    .font(.subheadline.bold())
+                    .frame(maxWidth: .infinity, minHeight: 50)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Nuclear.purple)
+            .accessibilityIdentifier("bilux.v63.mastery.open")
+        }
+    }
+
     private var rebirthCharacterSheet: some View {
         let progress = BILUXV55Progression.currentQuestProgress(journal.data)
         let minutes = journal.data.workouts.reduce(0) { $0 + max(0, $1.durationMinutes) }
@@ -2647,6 +2674,193 @@ private struct V62NuclearDebrief: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Fermer") { dismiss() }
                 }
+            }
+        }
+    }
+}
+
+// MARK: - BILUX V6.3 · NUCLEAR MASTERY — Fiche RPG interactive
+@MainActor
+private struct V63NuclearMasteryView: View {
+    @EnvironmentObject private var journal: BiluxStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var selectedPath = "force"
+    @State private var selectedNode: String? = nil
+
+    private var snapshot: V63MasterySnapshot { V63MasterySnapshot.evaluate(journal.data) }
+    private var paths: [V63MasteryBranch] { snapshot.branches }
+    private var active: V63MasteryBranch { paths.first(where: { $0.id == selectedPath }) ?? paths[0] }
+
+    private func color(_ id: String) -> Color {
+        switch id {
+        case "force": return Nuclear.gold
+        case "endurance": return .orange
+        case "regularity": return Nuclear.purple
+        default: return Nuclear.paleGold
+        }
+    }
+
+    var body: some View {
+        ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 17) {
+                    heroHeader
+                    SectionCaption(title: "Caractéristiques du combattant")
+                    VStack(spacing: 9) {
+                        ForEach(paths) { path in attributeRow(path) }
+                    }
+                    Text("Ces scores reflètent les activités consignées dans BILUX, pas ta force réelle ni ta condition médicale. Aucun XP supplémentaire.")
+                        .font(.caption2).foregroundStyle(Nuclear.muted)
+                    SectionCaption(title: "Arbre des quatre voies")
+                    HStack(spacing: 6) {
+                        ForEach(paths) { path in
+                            Button {
+                                selectedPath = path.id
+                                selectedNode = nil
+                            } label: {
+                                VStack(spacing: 5) {
+                                    Image(systemName: path.icon).font(.system(size: 17))
+                                    Text(path.title)
+                                        .font(.system(size: 8, weight: .heavy, design: .rounded))
+                                        .lineLimit(1).minimumScaleFactor(0.7)
+                                }
+                                .frame(maxWidth: .infinity, minHeight: 57)
+                                .foregroundStyle(selectedPath == path.id ? Nuclear.background : Nuclear.paleGold)
+                                .background(selectedPath == path.id ? color(path.id) : Nuclear.panel,
+                                            in: RoundedRectangle(cornerRadius: 13))
+                                .contentShape(RoundedRectangle(cornerRadius: 13))
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Voie \(path.title), \(path.unlockedCount) capacités débloquées sur 3")
+                        }
+                    }
+                    VStack(alignment: .leading, spacing: 9) {
+                        HStack {
+                            Text(active.title)
+                                .font(.system(.headline, design: .rounded, weight: .heavy))
+                                .foregroundStyle(color(active.id))
+                            Spacer()
+                            Text("\(active.unlockedCount)/3")
+                                .font(.caption.bold().monospacedDigit())
+                                .foregroundStyle(Nuclear.paleGold)
+                        }
+                        Text(active.subtitle).font(.caption).foregroundStyle(Nuclear.muted)
+                        ForEach(active.nodes) { node in nodeRow(node, tint: color(active.id)) }
+                    }
+                    .padding(12)
+                    .background(Nuclear.panel, in: RoundedRectangle(cornerRadius: 16))
+                    SectionCaption(title: "Prochaine quête de maîtrise")
+                    nextMilestone
+                    Text("Les capacités sont des titres et étapes symboliques. Elles se débloquent automatiquement grâce à tes séances existantes. Les journées de repos ne retirent aucun acquis.")
+                        .font(.caption2).foregroundStyle(Nuclear.muted)
+                        .padding(.bottom, 12)
+                }
+                .padding(15)
+            }
+            .background(Nuclear.background.ignoresSafeArea())
+            .navigationTitle("Nuclear Mastery")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Retour") { dismiss() }.tint(Nuclear.gold)
+                }
+            }
+    }
+
+    private var heroHeader: some View {
+        NuclearCard {
+            HStack(spacing: 12) {
+                Image(systemName: "crown.fill")
+                    .font(.system(size: 32, weight: .black))
+                    .foregroundStyle(Nuclear.gold)
+                    .frame(width: 44, height: 50)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("NUCLEAR MASTERY · V6.3")
+                        .font(.system(size: 10, weight: .heavy)).tracking(1)
+                        .foregroundStyle(Nuclear.gold)
+                    Text("LES QUATRE VOIES")
+                        .font(.title3.bold()).foregroundStyle(.white)
+                    Text("\(snapshot.unlockedTotal) / 12 capacités légendaires débloquées")
+                        .font(.caption).foregroundStyle(Nuclear.muted)
+                }
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
+    private func attributeRow(_ path: V63MasteryBranch) -> some View {
+        NuclearCard {
+            HStack(spacing: 9) {
+                Image(systemName: path.icon)
+                    .frame(width: 20)
+                    .foregroundStyle(color(path.id))
+                Text(path.title)
+                    .font(.system(size: 11, weight: .heavy)).foregroundStyle(Nuclear.paleGold)
+                Spacer(minLength: 4)
+                Text("\(path.levelPercent)/100")
+                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .foregroundStyle(.white)
+            }
+            ProgressView(value: min(1, Double(path.current) / Double(max(1, path.ultimateTarget))))
+                .tint(color(path.id))
+            Text("\(path.current) \(path.unit)")
+                .font(.caption2).foregroundStyle(Nuclear.muted)
+        }
+    }
+
+    private func nodeRow(_ node: V63MasteryNode, tint: Color) -> some View {
+        Button {
+            selectedNode = selectedNode == node.id ? nil : node.id
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 11) {
+                    Image(systemName: node.achieved ? node.icon : "lock.fill")
+                        .font(.title3)
+                        .foregroundStyle(node.achieved ? tint : Nuclear.muted)
+                        .frame(width: 28)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(node.title).font(.system(size: 12, weight: .heavy, design: .rounded))
+                            .foregroundStyle(node.achieved ? .white : Nuclear.muted)
+                        Text(node.achieved ? "DÉBLOQUÉ · EXPLOIT ACQUIS" : "SCELLÉ · \(node.current)/\(node.goal)")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(node.achieved ? tint : Nuclear.muted)
+                    }
+                    Spacer(minLength: 2)
+                    Image(systemName: selectedNode == node.id ? "chevron.up" : "chevron.down")
+                        .font(.caption.bold()).foregroundStyle(Nuclear.muted)
+                }
+                ProgressView(value: node.progress).tint(tint)
+                if selectedNode == node.id {
+                    Text(node.detail).font(.caption).foregroundStyle(Nuclear.paleGold)
+                    Text(node.achieved ? "Acquis automatiquement grâce au journal." : "Encore \(node.remaining) avant ce palier.")
+                        .font(.caption2).foregroundStyle(Nuclear.muted)
+                }
+            }
+            .padding(12)
+            .background(Nuclear.background.opacity(0.85), in: RoundedRectangle(cornerRadius: 12))
+            .contentShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(node.title), \(node.achieved ? "débloqué" : "verrouillé"), afficher les conditions")
+    }
+
+    private var nextMilestone: some View {
+        NuclearCard {
+            if let node = active.next {
+                Label(node.title, systemImage: "flag.checkered")
+                    .font(.headline).foregroundStyle(Nuclear.paleGold)
+                Text(node.detail).font(.caption).foregroundStyle(Nuclear.muted)
+                HStack {
+                    Text("\(node.current) / \(node.goal) \(active.unit)")
+                    Spacer()
+                    Text("\(node.remaining) restant(s)")
+                }
+                .font(.caption2.bold()).foregroundStyle(color(active.id))
+                ProgressView(value: node.progress).tint(color(active.id))
+            } else {
+                Label("VOIE MAÎTRISÉE", systemImage: "checkmark.seal.fill")
+                    .font(.headline.bold()).foregroundStyle(Nuclear.gold)
+                Text("Les trois capacités de cette voie sont acquises.")
+                    .font(.caption).foregroundStyle(Nuclear.muted)
             }
         }
     }
