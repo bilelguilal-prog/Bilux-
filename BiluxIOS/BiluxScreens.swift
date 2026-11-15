@@ -613,6 +613,7 @@ struct HomeScreen: View {
     @AppStorage("bilux.lastCelebratedLevel") private var lastCelebratedLevel = 0
     @AppStorage("bilux.equippedTransformationID") private var equippedTransformationID = -1
     @State private var showLevelUp = false
+    @State private var cinematicStage: NuclearStage? = nil
 
     private var homeStage: NuclearStage {
         NuclearStage.all.first(where: { $0.id == equippedTransformationID && $0.id <= journal.unlockedStageIndex })
@@ -697,6 +698,12 @@ struct HomeScreen: View {
                     showLevelUp = false
                 }
             }
+            .fullScreenCover(item: $cinematicStage) { stage in
+                BILUXV57RankCinema(stage: stage, effectsEnabled: effectsEnabled) {
+                    lastCelebratedLevel = max(lastCelebratedLevel, journal.heroLevel)
+                    cinematicStage = nil
+                }
+            }
             .alert("BILUX", isPresented: Binding(get: { health.message != nil }, set: { if !$0 { health.message = nil } })) {
                 Button("OK") { health.message = nil }
             } message: { Text(health.message ?? "") }
@@ -705,11 +712,19 @@ struct HomeScreen: View {
 
     private func checkForLevelUp() {
         let level = journal.heroLevel
+        guard !showLevelUp && cinematicStage == nil else { return }
         if lastCelebratedLevel == 0 {
-            // La premiere ouverture apres mise a jour ne declenche pas une fausse recompense.
+            // Première ouverture : pas de cinématique artificielle pour les rangs déjà acquis.
             lastCelebratedLevel = level
         } else if level > lastCelebratedLevel {
-            showLevelUp = true
+            let legacy = journal.data.longAscensionAnchor?.legacyStage ?? 0
+            let previousStage = max(NuclearStage.current(level: lastCelebratedLevel).id, legacy)
+            let currentStage = journal.unlockedStageIndex
+            if currentStage > previousStage {
+                cinematicStage = NuclearStage.all[currentStage]
+            } else {
+                showLevelUp = true
+            }
         }
     }
 
@@ -1031,6 +1046,7 @@ struct AscensionScreen: View {
     @AppStorage("bilux.effectsEnabled") private var effectsEnabled = true
     @AppStorage("bilux.equippedTransformationID") private var equippedTransformationID = -1
     @State private var selectedStage = 0
+    @State private var cinematicStage: NuclearStage? = nil
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -1117,6 +1133,13 @@ struct AscensionScreen: View {
                             }
                             .buttonStyle(.borderedProminent).tint(stage.accent)
                             .disabled(equippedTransformationID == stage.id)
+                            Button {
+                                cinematicStage = stage
+                            } label: {
+                                Label("REVOIR LA CINÉMATIQUE", systemImage: "film.stack.fill")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered).tint(stage.accent)
                         } else {
                             Label("Déblocage automatique au niveau \(stage.minLevel)", systemImage: "lock.fill")
                                 .font(.caption).foregroundStyle(Nuclear.muted)
@@ -1177,6 +1200,11 @@ struct AscensionScreen: View {
             .onAppear {
                 let unlocked = NuclearStage.all.first(where: { $0.id == equippedTransformationID && $0.id <= journal.unlockedStageIndex })
                 selectedStage = (unlocked ?? NuclearStage.all[journal.unlockedStageIndex]).id
+            }
+            .fullScreenCover(item: $cinematicStage) { stage in
+                BILUXV57RankCinema(stage: stage, effectsEnabled: effectsEnabled) {
+                    cinematicStage = nil
+                }
             }
             .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.json]) { result in
                 switch result {
@@ -1303,6 +1331,7 @@ private enum BILUXV56Boss: String, Identifiable, CaseIterable {
     var target: Int { self == .guardian ? 12 : 30 }
     var reward: Int { self == .guardian ? BILUXV55Progression.monthlyBossXP : BILUXV55Progression.legendaryBossXP }
     var symbol: String { self == .guardian ? "shield.lefthalf.filled" : "crown.fill" }
+    var artwork: String { self == .guardian ? "BILUXBossGuardian" : "BILUXBossSovereign" }
     var accent: Color { self == .guardian ? Nuclear.purple : Nuclear.gold }
 
     func countedDays(in data: BiluxData) -> Int {
@@ -1332,12 +1361,14 @@ private struct BILUXV56BossArena: View {
                 Button { selectedBoss = boss } label: {
                     NuclearCard {
                         HStack(alignment: .center, spacing: 12) {
-                            ZStack {
-                                Circle().fill(boss.accent.opacity(0.15))
-                                Image(systemName: defeated ? "checkmark.shield.fill" : boss.symbol)
-                                    .font(.system(size: 31, weight: .semibold))
-                                    .foregroundStyle(boss.accent)
-                            }.frame(width: 66, height: 66)
+                            Image(boss.artwork)
+                                .resizable().scaledToFill()
+                                .frame(width: 79, height: 91)
+                                .clipped()
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                                .overlay(RoundedRectangle(cornerRadius: 12)
+                                    .stroke(boss.accent.opacity(0.62), lineWidth: 1))
+                                .accessibilityHidden(true)
                             VStack(alignment: .leading, spacing: 5) {
                                 Text(boss.subtitle.uppercased())
                                     .font(.system(size: 9, weight: .heavy)).tracking(1)
@@ -1395,6 +1426,16 @@ private struct BILUXV56BossBattle: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var charged = false
     @State private var revealed = false
+    @State private var showVictory = false
+    @AppStorage("bilux.v57.guardianVictoryPeriod") private var guardianVictoryPeriod = ""
+    @AppStorage("bilux.v57.sovereignVictoryPeriod") private var sovereignVictoryPeriod = ""
+
+    private var periodID: String {
+        let parts = Calendar.current.dateComponents([.year, .month], from: .now)
+        let year = parts.year ?? 0
+        let month = parts.month ?? 1
+        return boss == .guardian ? "\(year)-\(month)" : "\(year)-Q\((month - 1) / 3 + 1)"
+    }
 
     private var count: Int { boss.countedDays(in: journal.data) }
     private var defeated: Bool { count >= boss.target }
@@ -1413,41 +1454,7 @@ private struct BILUXV56BossBattle: View {
                     .font(.system(.title2, design: .rounded).weight(.heavy))
                     .multilineTextAlignment(.center).foregroundStyle(.white)
 
-                ZStack {
-                    RoundedRectangle(cornerRadius: 24)
-                        .fill(LinearGradient(colors: [boss.accent.opacity(0.17), Nuclear.panel, Nuclear.background],
-                                             startPoint: .topLeading, endPoint: .bottomTrailing))
-                    RadialGradient(colors: [boss.accent.opacity(charged ? 0.34 : 0.16), .clear],
-                                   center: .center, startRadius: 18, endRadius: 180)
-                        .clipShape(RoundedRectangle(cornerRadius: 24))
-                    Circle()
-                        .stroke(boss.accent.opacity(0.32), lineWidth: 1)
-                        .frame(width: 188, height: 188)
-                    Circle()
-                        .trim(from: 0.04, to: 0.74)
-                        .stroke(boss.accent.opacity(0.85), style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                        .frame(width: 211, height: 211)
-                        .rotationEffect(.degrees(charged ? 35 : -14))
-                    Image(systemName: defeated ? "checkmark.shield.fill" : boss.symbol)
-                        .font(.system(size: 93, weight: .ultraLight))
-                        .foregroundStyle(boss.accent)
-                        .shadow(color: boss.accent.opacity(0.65), radius: charged ? 24 : 8)
-                        .scaleEffect(charged ? 1.02 : 0.96)
-                    if defeated {
-                        VStack {
-                            Spacer()
-                            Text("VICTOIRE")
-                                .font(.system(size: 11, weight: .black, design: .rounded))
-                                .tracking(3)
-                                .padding(.horizontal, 16).padding(.vertical, 8)
-                                .foregroundStyle(Nuclear.background)
-                                .background(Nuclear.paleGold, in: Capsule())
-                        }.padding(.bottom, 19)
-                        .opacity(revealed ? 1 : (canAnimate ? 0 : 1))
-                    }
-                }
-                .frame(height: 268)
-                .accessibilityLabel(defeated ? "Boss vaincu" : "Boss en cours")
+                BILUXV57BossPortrait(boss: boss, defeated: defeated, charged: charged)
 
                 NuclearCard {
                     HStack {
@@ -1478,6 +1485,12 @@ private struct BILUXV56BossBattle: View {
                     if !defeated {
                         Text("Encore \(remaining) journée\(remaining > 1 ? "s" : "") de séance pour vaincre ce boss, sans limite de séries consécutives.")
                             .font(.caption).foregroundStyle(boss.accent)
+                    } else {
+                        Button { showVictory = true } label: {
+                            Label("REVOIR LA VICTOIRE", systemImage: "crown.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent).tint(boss.accent)
                     }
                 }
                 Text("Aucune action dans cette arène n'ajoute d'XP. Le repos est toujours autorisé et n'inflige aucun dégât à ta progression.")
@@ -1504,5 +1517,212 @@ private struct BILUXV56BossBattle: View {
         .onChange(of: effectsEnabled) { _, enabled in
             if !enabled { charged = false; revealed = true }
         }
+        .task(id: defeated) {
+            guard defeated else { return }
+            let alreadyPlayed = boss == .guardian ? guardianVictoryPeriod : sovereignVictoryPeriod
+            guard alreadyPlayed != periodID else { return }
+            if boss == .guardian { guardianVictoryPeriod = periodID }
+            else { sovereignVictoryPeriod = periodID }
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            showVictory = true
+        }
+        .fullScreenCover(isPresented: $showVictory) {
+            BILUXV57VictoryCinema(boss: boss) { showVictory = false }
+        }
+    }
+}
+
+// MARK: - BILUX V5.7 · NUCLEAR AWAKENING
+// Présentation uniquement : aucun ajout d'XP, aucun changement du journal ou de HealthKit.
+private struct BILUXV57RankCinema: View {
+    let stage: NuclearStage
+    let effectsEnabled: Bool
+    let onDismiss: () -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var phase = 0
+
+    private var animated: Bool { effectsEnabled && !reduceMotion }
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                Nuclear.background.ignoresSafeArea()
+                // V5.3.2 : portrait dans un cadre fixe, jamais de scaleEffect sur la photo.
+                Image(stage.artwork)
+                    .resizable().scaledToFill()
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    .clipped()
+                    .accessibilityHidden(true)
+
+                LinearGradient(colors: [Nuclear.background.opacity(0.25), .clear,
+                                        Nuclear.background.opacity(0.65), Nuclear.background],
+                               startPoint: .top, endPoint: .bottom)
+                    .ignoresSafeArea()
+                RadialGradient(colors: [stage.accent.opacity(phase >= 2 ? 0.37 : 0.10), .clear],
+                               center: .center, startRadius: 25, endRadius: 340)
+                    .blendMode(.screen)
+                    .allowsHitTesting(false)
+
+                VStack(spacing: 12) {
+                    Text("BILUX · ÉVEIL NUCLÉAIRE")
+                        .font(.system(size: 11, weight: .black, design: .rounded))
+                        .tracking(3).foregroundStyle(Nuclear.paleGold)
+                        .padding(.top, 48)
+                    Spacer()
+                    Image(systemName: stage.symbol)
+                        .font(.system(size: 42, weight: .semibold))
+                        .foregroundStyle(stage.accent)
+                        .shadow(color: stage.accent.opacity(0.8), radius: phase >= 2 ? 25 : 6)
+                        .scaleEffect(phase >= 2 ? 1 : 0.75)
+                    Text(phase >= 2 ? "TRANSFORMATION RÉVÉLÉE" : "LE RÉACTEUR S'ÉVEILLE")
+                        .font(.system(size: 11, weight: .black))
+                        .tracking(2).foregroundStyle(Nuclear.paleGold)
+                    Text(stage.name)
+                        .font(.system(size: 37, weight: .black, design: .rounded))
+                        .minimumScaleFactor(0.55).lineLimit(1)
+                        .foregroundStyle(.white)
+                        .shadow(color: stage.accent.opacity(0.9), radius: 14)
+                    Text("RANG · NIVEAU \(stage.minLevel)+")
+                        .font(.caption.bold()).tracking(2).foregroundStyle(stage.accent)
+                    Text(stage.subtitle)
+                        .font(.subheadline).foregroundStyle(.white.opacity(0.9))
+                    Button(action: onDismiss) {
+                        Label("CONTINUER L'ASCENSION", systemImage: "bolt.shield.fill")
+                            .font(.headline.bold()).frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                    }
+                    .buttonStyle(.borderedProminent).tint(Nuclear.gold)
+                    .padding(.top, 21)
+                    .accessibilityIdentifier("bilux.v57.closeRankCinema")
+                    Spacer().frame(height: 36)
+                }
+                .padding(.horizontal, 27)
+                .multilineTextAlignment(.center)
+                .opacity(phase >= 1 ? 1 : 0.25)
+            }
+            .frame(width: geometry.size.width, height: geometry.size.height)
+        }
+        .background(Nuclear.background)
+        .task {
+            guard animated else { phase = 3; return }
+            withAnimation(.easeOut(duration: 1.1)) { phase = 1 }
+            try? await Task.sleep(nanoseconds: 1_100_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 1.9)) { phase = 2 }
+        }
+        .accessibilityLabel("Cinématique de transformation, rang \(stage.name)")
+    }
+}
+
+private struct BILUXV57BossPortrait: View {
+    let boss: BILUXV56Boss
+    let defeated: Bool
+    let charged: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage("bilux.effectsEnabled") private var effectsEnabled = true
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack(alignment: .bottomLeading) {
+                Image(boss.artwork)
+                    .resizable().scaledToFill()
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    .clipped()
+                    .accessibilityHidden(true)
+                LinearGradient(colors: [.clear, Nuclear.background.opacity(0.18),
+                                        Nuclear.background.opacity(0.85)],
+                               startPoint: .top, endPoint: .bottom)
+                RadialGradient(colors: [boss.accent.opacity(charged ? 0.20 : 0.10), .clear],
+                               center: .center, startRadius: 15, endRadius: 250)
+                    .blendMode(.screen).allowsHitTesting(false)
+                    .animation(effectsEnabled && !reduceMotion
+                               ? .easeInOut(duration: 6.5) : nil, value: charged)
+                HStack(spacing: 8) {
+                    Image(systemName: defeated ? "checkmark.seal.fill" : boss.symbol)
+                        .foregroundStyle(boss.accent)
+                    Text(defeated ? "VICTOIRE" : "ÉPREUVE EN COURS")
+                        .font(.system(size: 11, weight: .heavy, design: .rounded))
+                        .tracking(1).foregroundStyle(.white)
+                }
+                .padding(12)
+                .background(Nuclear.background.opacity(0.82), in: Capsule())
+                .padding(17)
+            }
+            .frame(width: geometry.size.width, height: geometry.size.height)
+            .clipped()
+        }
+        .frame(height: 300)
+        .clipShape(RoundedRectangle(cornerRadius: 24))
+        .overlay(RoundedRectangle(cornerRadius: 24)
+                    .stroke(boss.accent.opacity(0.40), lineWidth: 1.4))
+        .accessibilityLabel(defeated ? "Portrait du boss vaincu" : "Portrait de \(boss.title)")
+    }
+}
+
+private struct BILUXV57VictoryCinema: View {
+    let boss: BILUXV56Boss
+    let onDismiss: () -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage("bilux.effectsEnabled") private var effectsEnabled = true
+    @State private var revealed = false
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                Nuclear.background.ignoresSafeArea()
+                Image(boss.artwork).resizable().scaledToFill()
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    .clipped().opacity(0.67)
+                    .accessibilityHidden(true)
+                LinearGradient(colors: [Nuclear.background.opacity(0.25),
+                                        Nuclear.background.opacity(0.47), Nuclear.background],
+                               startPoint: .top, endPoint: .bottom)
+                    .ignoresSafeArea()
+                RadialGradient(colors: [boss.accent.opacity(revealed ? 0.4 : 0.1), .clear],
+                               center: .center, startRadius: 20, endRadius: 300)
+                    .blendMode(.screen).allowsHitTesting(false)
+                VStack(spacing: 17) {
+                    Spacer()
+                    Image(systemName: "crown.fill")
+                        .font(.system(size: 66)).foregroundStyle(Nuclear.paleGold)
+                        .shadow(color: Nuclear.gold.opacity(0.8), radius: revealed ? 24 : 8)
+                        .scaleEffect(revealed ? 1 : 0.82)
+                    Text("BOSS TERRASSÉ")
+                        .font(.system(size: 13, weight: .black)).tracking(3)
+                        .foregroundStyle(Nuclear.paleGold)
+                    Text("VICTOIRE")
+                        .font(.system(size: 48, weight: .black, design: .rounded))
+                        .foregroundStyle(.white)
+                        .shadow(color: boss.accent.opacity(0.85), radius: 18)
+                    Text(boss.title)
+                        .font(.title3.bold()).foregroundStyle(boss.accent)
+                        .multilineTextAlignment(.center)
+                    Text("+\(boss.reward) XP")
+                        .font(.title.bold()).foregroundStyle(Nuclear.paleGold)
+                    Text("Récompense déjà attribuée automatiquement par ton journal. Revoir cette scène ne rapporte jamais d'XP.")
+                        .font(.caption).multilineTextAlignment(.center)
+                        .foregroundStyle(.white.opacity(0.8))
+                    Button(action: onDismiss) {
+                        Text("RETOURNER À L'ARÈNE").font(.headline.bold())
+                            .frame(maxWidth: .infinity).padding(.vertical, 9)
+                    }
+                    .buttonStyle(.borderedProminent).tint(Nuclear.gold)
+                    .padding(.top, 14)
+                    Spacer().frame(height: 35)
+                }
+                .padding(.horizontal, 25)
+            }
+            .frame(width: geometry.size.width, height: geometry.size.height)
+        }
+        .background(Nuclear.background)
+        .onAppear {
+            withAnimation(effectsEnabled && !reduceMotion ? .easeOut(duration: 2.2) : nil) {
+                revealed = true
+            }
+        }
+        .accessibilityLabel("Victoire sur \(boss.title), \(boss.reward) XP déjà attribués")
     }
 }
