@@ -407,6 +407,19 @@ private enum V65ThunderRenderer {
         CGPoint(x: x * size.width, y: y * size.height)
     }
 
+    // V6.6 · CINEMATIC STORM
+    // The renderer is stateless: deterministic seeds lock one geometry for the
+    // entire discharge. Rhythm is SHARED between rear/front layers so that at
+    // most three main bolts can overlap in Epic mode (two rear, one foreground).
+    // Deliberate silent phases avoid the frantic strobe visible in V6.5.
+    private static func cinematicEnvelope(age: Double, lifetime: Double) -> Double {
+        guard age >= 0, age < lifetime else { return 0 }
+        let attack = min(1.0, age / 0.075)
+        if age < 0.31 { return attack }
+        let decay = max(0, 1.0 - (age - 0.31) / (lifetime - 0.31))
+        return pow(decay, 1.35)
+    }
+
     static func draw(_ context: inout GraphicsContext, size: CGSize, time: TimeInterval,
                      stage: Int, masteryCount: Int, dominantPath: String,
                      epic: Bool, plane: V65StormPlane) {
@@ -414,90 +427,104 @@ private enum V65ThunderRenderer {
         let isFront = plane == .front
         let colors = palette(dominantPath, stage: stage)
         let progress = min(12, max(0, masteryCount))
-        // FEWER, bigger bolts; rear thunder is longer, foreground only crosses
-        // shoulders and reactor rather than scribbling over the character's face.
-        let count = isFront ? (epic ? 3 : 2) : (epic ? 5 : 3)
-        let cadence = epic ? 2.4 : 1.7
-        let magnitude = min(1.0, 0.77 + Double(stage) * 0.035 + Double(progress) * 0.008)
-        let sway = CGFloat(sin(time * (isFront ? 1.6 : 0.84)))
+        let magnitude = min(1.0, 0.79 + Double(stage) * 0.033 + Double(progress) * 0.008)
+
+        // One coherent storm burst, not independent, high-speed flash generators.
+        // Epic: 3 main strikes per 2.18 s, lasting 0.73 s each; roughly 0.7 s
+        // of breathing room after the last strike. Balanced is quieter still.
+        let cycleLength: Double = epic ? 2.18 : 3.05
+        let cycle = Int64(floor(time / cycleLength))
+        let phase = time - Double(cycle) * cycleLength
+        let count = isFront ? 1 : (epic ? 2 : 1)
+        let lifetime: Double = epic ? 0.73 : 0.60
 
         for index in 0..<count {
-            // Each discharge has its own short and irregular attack/restrike.
-            let offset = Double(index) * 0.71 + (isFront ? 0.24 : 0)
-            let elapsed = time * cadence + offset
-            let beat = floor(elapsed)
-            let phase = elapsed - beat
-            let impulse: Double
-            if phase < 0.10 { impulse = 1.0 }
-            else if phase < 0.16 { impulse = 0.21 }
-            else if phase < 0.23 { impulse = 0.74 }
-            else if phase < 0.31 { impulse = 0.18 }
-            else { impulse = 0.0 }
-            guard impulse > 0 else { continue }
-            let seed = Int64(beat) &* 16777619 &+ Int64(index) &* 741103597
-                &+ (isFront ? 977 : 231)
+            let seed = cycle &* 16777619 &+ Int64(index) &* 741103597
+                &+ (isFront ? 9176 : 231)
             var rng = V64StormRNG(seed: UInt64(bitPattern: seed))
-            let fromLeft = index.isMultiple(of: 2)
+            let offset: Double
+            if isFront {
+                offset = epic ? 0.38 : 0.57
+            } else {
+                offset = index == 0 ? 0.07 : 0.73
+            }
+            // Stable per-burst variation, not a random trajectory every frame.
+            let startAt = offset + Double(rng.next()) * 0.055
+            let age = phase - startAt
+            let envelope = cinematicEnvelope(age: age, lifetime: lifetime)
+            guard envelope > 0.045 else { continue }
+
+            let fromLeft = ((cycle + Int64(index)).isMultiple(of: 2)) != isFront
             let start: CGPoint
             let end: CGPoint
             if isFront {
-                // Front arcs orbit across the reactor / outer shoulders only.
-                start = point(fromLeft ? -0.10 : 1.10,
-                              0.66 + CGFloat(index % 2) * 0.19, size)
-                end = point((fromLeft ? 0.43 : 0.58) + sway * 0.016,
-                            0.72 + rng.next() * 0.20, size)
-            } else {
-                // Thunder originates in the storm BEHIND the silhouette.
+                // Rare, prominent bolt from outer shoulder to lower reactor.
                 start = point(fromLeft ? -0.09 : 1.09,
-                              -0.10 + rng.next() * 0.42, size)
-                end = point((fromLeft ? 0.57 : 0.42) + sway * 0.025,
-                            0.59 + rng.next() * 0.36, size)
+                              0.67 + rng.next() * 0.10, size)
+                end = point(fromLeft ? 0.46 : 0.54,
+                            0.74 + rng.next() * 0.15, size)
+            } else {
+                // Long lightning bolt in the STORM BEHIND the hero. Vision's
+                // foreground cutout hides this layer behind head/shoulders.
+                start = point(fromLeft ? -0.09 : 1.09,
+                              -0.12 + rng.next() * 0.38, size)
+                end = point(fromLeft ? 0.59 : 0.41,
+                            0.60 + rng.next() * 0.32, size)
             }
-            let points = jagged(from: start, to: end,
-                                count: epic ? 18 : 13,
-                                chaos: min(size.width, size.height) * (isFront ? 0.09 : 0.14),
-                                rng: &rng)
-            let strength = magnitude * impulse * (isFront ? 0.82 : 1.0)
-            flash(route(points), context: &context,
-                  color: colors.0, core: colors.1, strength: strength,
+
+            let points = jagged(from: start, to: end, count: epic ? 17 : 13,
+                                chaos: min(size.width, size.height)
+                                    * (isFront ? 0.085 : 0.13), rng: &rng)
+            // Keep the bright core briefly vivid, then a slower visible glow.
+            // No rapid 100%-20%-80%-0% restrike sequence as in V6.5.
+            let core = age < 0.19 ? 1.0 : 0.80
+            let strength = magnitude * envelope * core
+                * (isFront ? 0.89 : (index == 1 ? 0.87 : 1.0))
+            flash(route(points), context: &context, color: colors.0,
+                  core: colors.1, strength: strength,
                   front: isFront, epic: epic)
 
-            for branchID in 0..<(epic ? 3 : 2) {
-                let count = max(4, points.count - 4)
-                let base = 2 + Int(rng.next() * CGFloat(count - 2))
+            // Two branches MAX in Epic (instead of three in V6.5).
+            for branchID in 0..<(epic ? 2 : 1) {
+                let available = max(4, points.count - 4)
+                let base = 2 + Int(rng.next() * CGFloat(available - 2))
                 let anchor = points[min(base, points.count - 2)]
-                let dx = (fromLeft ? 1.0 : -1.0) * (0.09 + rng.next() * 0.16)
-                let dy = 0.04 + rng.next() * 0.17
+                let dx = (fromLeft ? 1.0 : -1.0) * (0.08 + rng.next() * 0.15)
+                let dy = 0.04 + rng.next() * 0.14
                 let tip = CGPoint(x: anchor.x + dx * size.width,
                                   y: anchor.y + dy * size.height)
                 let branchPoints = jagged(from: anchor, to: tip,
                                           count: 5 + branchID,
-                                          chaos: size.width * 0.045, rng: &rng)
+                                          chaos: size.width * 0.042, rng: &rng)
                 flash(route(branchPoints), context: &context,
                       color: colors.0, core: colors.1,
-                      strength: strength * 0.62,
-                      front: isFront, epic: epic, branch: true)
+                      strength: strength * 0.54, front: isFront,
+                      epic: epic, branch: true)
             }
         }
 
-        // Brief shockwave wrapping the lower torso: half behind and half in front.
-        // Not a permanent flat orbit/ring drawn over the face.
-        let waveTime = time * (epic ? 1.38 : 0.94)
-        let wavePhase = waveTime - floor(waveTime)
-        if wavePhase < 0.14 {
-            let seed = Int64(floor(waveTime)) &* 31337 &+ (isFront ? 17 : 11)
-            var rng = V64StormRNG(seed: UInt64(bitPattern: seed))
-            let center = point(0.50 + sway * 0.012, 0.82, size)
-            var orbit: [CGPoint] = []
-            for i in 0...14 {
-                let t = CGFloat(i) / 14
-                let angle = (isFront ? CGFloat(0.05) : CGFloat.pi) + t * .pi
-                let jitter = (rng.next() - 0.5) * size.width * 0.035
-                orbit.append(CGPoint(x: center.x + cos(angle) * (size.width * 0.42 + jitter),
-                                     y: center.y + sin(angle) * size.height * 0.105 + jitter * 0.2))
+        // One restrained reactor shockwave every fifth EPIC burst.
+        // It lives in the rear/front split rather than scribbling across the face.
+        if epic && cycle.isMultiple(of: 5) {
+            let age = phase - 1.54
+            let shock = cinematicEnvelope(age: age, lifetime: 0.36)
+            if shock > 0.08 {
+                let seed = cycle &* 31337 &+ (isFront ? 17 : 11)
+                var rng = V64StormRNG(seed: UInt64(bitPattern: seed))
+                let center = point(0.50, 0.83, size)
+                var orbit: [CGPoint] = []
+                for i in 0...12 {
+                    let fraction = CGFloat(i) / 12
+                    let angle = (isFront ? CGFloat(0.05) : CGFloat.pi) + fraction * .pi
+                    let jitter = (rng.next() - 0.5) * size.width * 0.027
+                    orbit.append(CGPoint(x: center.x + cos(angle) * (size.width * 0.37 + jitter),
+                                         y: center.y + sin(angle) * size.height * 0.09))
+                }
+                flash(route(orbit), context: &context, color: colors.0,
+                      core: colors.1, strength: magnitude * shock
+                        * (isFront ? 0.38 : 0.22),
+                      front: isFront, epic: epic)
             }
-            flash(route(orbit), context: &context, color: colors.0, core: colors.1,
-                  strength: magnitude * (isFront ? 0.54 : 0.30), front: isFront, epic: epic)
         }
     }
 }
@@ -1754,7 +1781,7 @@ struct AscensionScreen: View {
                     SectionCaption(title: "Effets visuels")
                     NuclearCard {
                         Toggle("Animations nucléaires", isOn: $effectsEnabled).tint(Nuclear.gold)
-                        Text("THUNDER DEPTH · V6.5")
+                        Text("CINEMATIC STORM · V6.6")
                             .font(.caption.bold()).foregroundStyle(Nuclear.gold)
                         Picker("Intensité de l'orage", selection: $stormIntensity) {
                             Text("Équilibré").tag("balanced")
@@ -1762,7 +1789,7 @@ struct AscensionScreen: View {
                         }
                         .pickerStyle(.segmented)
                         .disabled(!effectsEnabled)
-                        Text("Foudre d'orage en profondeur : derrière la silhouette, autour du réacteur, puis quelques décharges devant. Détourage automatique sur l'iPhone avec Apple Vision (si détectable), sans transfert de photo. Mode Épique par défaut. Aucun effet sur les XP.")
+                        Text("Mode Épique cinématique : trois décharges principales au maximum par rafale, environ 0,7 seconde de présence et de vraies accalmies. La foudre reste derrière ou devant la silhouette grâce au détourage Apple Vision lorsque disponible. Aucun bonus d’XP.")
                             .font(.caption2).foregroundStyle(Nuclear.muted)
                         Text("Désactive les effets animés pour économiser la batterie. Le réglage de réduction des animations d'iOS est respecté.")
                             .font(.caption2).foregroundStyle(Nuclear.muted)
