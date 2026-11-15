@@ -23,14 +23,18 @@
 		58DA93DBA5AF542A9D389E9E /* WatchRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D07E1A6AA09948687ACCB42 /* WatchRootView.swift */; };
 		F00140FC91B5413EE9A5896B /* Watch Assets in Resources */ = {isa = PBXBuildFile; fileRef = B1D5F5A3115BCC983E862F1B /* Assets.xcassets */; };
 		F38B57DE4C6F40D1D5CD7141 /* BiluxWatch.app in Embed Watch Content */ = {isa = PBXBuildFile; fileRef = 22F007B4F85553DFA1C3C42D /* BiluxWatch.app */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		D9813CADAD9E9E4BD5B8B8D6 /* NuclearLiveWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E826B95014A84CA8933D9BA /* NuclearLiveWidget.swift */; };
+		595EBCCBCACEEBE2CEF8A0DF /* BiluxWatchWidget.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 8B5458C0850681F2C2E1346E /* BiluxWatchWidget.appex */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
         156B395C06DCFF24D758FC7D /* Watch proxy */ = {isa = PBXContainerItemProxy; containerPortal = 439A1489934641902C60A204; proxyType = 1; remoteGlobalIDString = 03E38C1235F9DA9063F4015E; remoteInfo = BiluxWatch; };
+		065B45219ABC919FC37517C3 /* Widget proxy */ = {isa = PBXContainerItemProxy; containerPortal = 439A1489934641902C60A204; proxyType = 1; remoteGlobalIDString = A1888B1D15F58F1351F44ACE; remoteInfo = BiluxWatchWidget; };
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
         A79EA7AA94C9596F713971EF /* Embed Watch Content */ = {isa = PBXCopyFilesBuildPhase; buildActionMask = 2147483647; dstPath = "$(CONTENTS_FOLDER_PATH)/Watch"; dstSubfolderSpec = 16; files = (F38B57DE4C6F40D1D5CD7141 /* BiluxWatch.app */); name = "Embed Watch Content"; runOnlyForDeploymentPostprocessing = 0; };
+		EA320D3D7A1E6E1FC51E0757 /* Embed App Extensions */ = {isa = PBXCopyFilesBuildPhase; buildActionMask = 2147483647; dstPath = ""; dstSubfolderSpec = 13; files = (595EBCCBCACEEBE2CEF8A0DF /* BiluxWatchWidget.appex */); name = "Embed App Extensions"; runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
@@ -55,15 +59,19 @@
 		0D2A253AAF1B1C587A191BCD /* BiluxWatch.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = BiluxWatch.entitlements; sourceTree = "<group>"; };
 		B1D5F5A3115BCC983E862F1B /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		22F007B4F85553DFA1C3C42D /* BiluxWatch.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BiluxWatch.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		9E826B95014A84CA8933D9BA /* NuclearLiveWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NuclearLiveWidget.swift; sourceTree = "<group>"; };
+		C6E93649D08C9AF0C2920F7C /* Widget Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		8B5458C0850681F2C2E1346E /* BiluxWatchWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = BiluxWatchWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		E3F06FD7C13F014006BB4448 /* Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 		7BE01B7E031C4F038B4EEBCA /* Watch Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		CCF8A7E79999651683E1FCA5 /* Widget Frameworks */ = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		304FDC8BEF893C116B6F96EE = {isa = PBXGroup; children = (097BD6E55910A674447D81C6 /* BiluxIOS */, E2406DF7CE795DC4E036C0CC /* BiluxWatch */, 48494DDE09B6C9886443EFC0 /* BiluxShared */, 811A418E8A3EB06D20C111F0 /* Products */); sourceTree = "<group>"; };
+		304FDC8BEF893C116B6F96EE = {isa = PBXGroup; children = (097BD6E55910A674447D81C6 /* BiluxIOS */, E2406DF7CE795DC4E036C0CC /* BiluxWatch */, 48494DDE09B6C9886443EFC0 /* BiluxShared */, D9734E6D14CE38268B1E6C57 /* BiluxWatchWidget */, 811A418E8A3EB06D20C111F0 /* Products */); sourceTree = "<group>"; };
 		097BD6E55910A674447D81C6 /* BiluxIOS */ = {isa = PBXGroup; children = (
 				6755EEB7AF41FAFBE00CB5A4 /* BiluxApp.swift */,
 				4C306D254DE8B0636B16E55E /* BiluxScreens.swift */,
@@ -77,7 +85,7 @@
 				605982921DAA8CD491D368D3 /* Info.plist */,
 				058F490602B2B62C771FFB0F /* BiluxIOS.entitlements */,
 			); path = BiluxIOS; sourceTree = "<group>"; };
-		811A418E8A3EB06D20C111F0 /* Products */ = {isa = PBXGroup; children = (CC340BB9FA1DB34CACC6DA03 /* BiluxIOS.app */, 22F007B4F85553DFA1C3C42D /* BiluxWatch.app */); name = Products; sourceTree = "<group>"; };
+		811A418E8A3EB06D20C111F0 /* Products */ = {isa = PBXGroup; children = (CC340BB9FA1DB34CACC6DA03 /* BiluxIOS.app */, 22F007B4F85553DFA1C3C42D /* BiluxWatch.app */, 8B5458C0850681F2C2E1346E /* BiluxWatchWidget.appex */); name = Products; sourceTree = "<group>"; };
 		E2406DF7CE795DC4E036C0CC /* BiluxWatch */ = {isa = PBXGroup; children = (
              69131E21378525CC21D29F2C /* BiluxWatchApp.swift */,
              B2CBCC0F005E066A52707FE3 /* WatchBridge.swift */,
@@ -88,19 +96,21 @@
              0D2A253AAF1B1C587A191BCD /* BiluxWatch.entitlements */,
          ); path = BiluxWatch; sourceTree = "<group>"; };
 		48494DDE09B6C9886443EFC0 /* BiluxShared */ = {isa = PBXGroup; children = (F17B3F861CEBE2EB2DE42924 /* WatchSnapshot.swift */, ); path = BiluxShared; sourceTree = "<group>"; };
+		D9734E6D14CE38268B1E6C57 /* BiluxWatchWidget */ = {isa = PBXGroup; children = (9E826B95014A84CA8933D9BA /* NuclearLiveWidget.swift */, C6E93649D08C9AF0C2920F7C /* Info.plist */); path = BiluxWatchWidget; sourceTree = "<group>"; };
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
 		1952ACBA95857616D2C65FE6 /* BiluxIOS */ = {isa = PBXNativeTarget; buildConfigurationList = F6282F1F8302DEED6C065DE0 /* Build configuration list for PBXNativeTarget "BiluxIOS" */; buildPhases = (A2982903B87765C1546D4580 /* Sources */, E3F06FD7C13F014006BB4448 /* Frameworks */, 6993F04E30712B11E97F63E4 /* Resources */, A79EA7AA94C9596F713971EF /* Embed Watch Content */); buildRules = (); dependencies = (8940EE30880B27E090C37999 /* Watch dependency */, ); name = BiluxIOS; productName = BiluxIOS; productReference = CC340BB9FA1DB34CACC6DA03 /* BiluxIOS.app */; productType = "com.apple.product-type.application"; };
 		03E38C1235F9DA9063F4015E /* BiluxWatch */ = {isa = PBXNativeTarget; buildConfigurationList = 3C90C60919DE960F7797C8C5 /* Watch config list */;
-             buildPhases = (F3770905F93BD3B934392118 /* Sources */, 7BE01B7E031C4F038B4EEBCA /* Frameworks */, C3BC442ECB1E3A6F3E0EFA11 /* Resources */);
-             buildRules = (); dependencies = (); name = BiluxWatch; productName = BiluxWatch;
+             buildPhases = (F3770905F93BD3B934392118 /* Sources */, 7BE01B7E031C4F038B4EEBCA /* Frameworks */, C3BC442ECB1E3A6F3E0EFA11 /* Resources */, EA320D3D7A1E6E1FC51E0757 /* Embed App Extensions */);
+             buildRules = (); dependencies = (6D26BE3E14C41579E24E1C1E /* Widget dependency */, ); name = BiluxWatch; productName = BiluxWatch;
              productReference = 22F007B4F85553DFA1C3C42D /* BiluxWatch.app */;
              productType = "com.apple.product-type.application"; };
+		A1888B1D15F58F1351F44ACE /* BiluxWatchWidget */ = {isa = PBXNativeTarget; buildConfigurationList = D9A52CE9712C6311815AC710 /* Widget config list */; buildPhases = (FB98F13B519D4FE9DBFB0DE2 /* Sources */, CCF8A7E79999651683E1FCA5 /* Frameworks */); buildRules = (); dependencies = (); name = BiluxWatchWidget; productName = BiluxWatchWidget; productReference = 8B5458C0850681F2C2E1346E /* BiluxWatchWidget.appex */; productType = "com.apple.product-type.app-extension"; };
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
-		439A1489934641902C60A204 /* Project object */ = {isa = PBXProject; attributes = {BuildIndependentTargetsInParallel = 1; LastUpgradeCheck = 1600; TargetAttributes = {1952ACBA95857616D2C65FE6 = {CreatedOnToolsVersion = 16.0; }; 03E38C1235F9DA9063F4015E = {CreatedOnToolsVersion = 16.0; }; }; }; buildConfigurationList = 8AC64F79374AFE2C8C5B6B15; compatibilityVersion = "Xcode 14.0"; developmentRegion = fr; hasScannedForEncodings = 0; knownRegions = (fr, en, Base); mainGroup = 304FDC8BEF893C116B6F96EE; productRefGroup = 811A418E8A3EB06D20C111F0; projectDirPath = ""; projectRoot = ""; targets = (1952ACBA95857616D2C65FE6, 03E38C1235F9DA9063F4015E /* BiluxWatch */); };
+		439A1489934641902C60A204 /* Project object */ = {isa = PBXProject; attributes = {BuildIndependentTargetsInParallel = 1; LastUpgradeCheck = 1600; TargetAttributes = {1952ACBA95857616D2C65FE6 = {CreatedOnToolsVersion = 16.0; }; 03E38C1235F9DA9063F4015E = {CreatedOnToolsVersion = 16.0; }; A1888B1D15F58F1351F44ACE = {CreatedOnToolsVersion = 16.0; }; }; }; buildConfigurationList = 8AC64F79374AFE2C8C5B6B15; compatibilityVersion = "Xcode 14.0"; developmentRegion = fr; hasScannedForEncodings = 0; knownRegions = (fr, en, Base); mainGroup = 304FDC8BEF893C116B6F96EE; productRefGroup = 811A418E8A3EB06D20C111F0; projectDirPath = ""; projectRoot = ""; targets = (1952ACBA95857616D2C65FE6, 03E38C1235F9DA9063F4015E /* BiluxWatch */, A1888B1D15F58F1351F44ACE /* BiluxWatchWidget */); };
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
@@ -121,10 +131,12 @@
 				07BAD10632E7FB84639F1390 /* V3Import.swift in Sources */,
 			); runOnlyForDeploymentPostprocessing = 0; };
 		F3770905F93BD3B934392118 /* Watch Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (4B07F44C67C2EA1950939071, C062C6FFA428A2059F609884, 5C7955D76FE1F5268C27B72B, 58DA93DBA5AF542A9D389E9E, 0389A251E22B1B8A84325F58 /* Snapshot */); runOnlyForDeploymentPostprocessing = 0; };
+		FB98F13B519D4FE9DBFB0DE2 /* Widget Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (D9813CADAD9E9E4BD5B8B8D6 /* NuclearLiveWidget.swift */); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
         8940EE30880B27E090C37999 /* Watch dependency */ = {isa = PBXTargetDependency; target = 03E38C1235F9DA9063F4015E /* BiluxWatch */; targetProxy = 156B395C06DCFF24D758FC7D /* Watch proxy */; };
+		6D26BE3E14C41579E24E1C1E /* Widget dependency */ = {isa = PBXTargetDependency; target = A1888B1D15F58F1351F44ACE /* BiluxWatchWidget */; targetProxy = 065B45219ABC919FC37517C3 /* Widget proxy */; };
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
@@ -166,12 +178,46 @@
         WATCHOS_DEPLOYMENT_TARGET = 11.0;
         SWIFT_OPTIMIZATION_LEVEL = "-O";
     }; name = Release; };
+		B789567E655960B29BAF4905 /* Debug Widget */ = {isa = XCBuildConfiguration; buildSettings = {
+        APPLICATION_EXTENSION_API_ONLY = YES;
+        CODE_SIGN_STYLE = Automatic;
+        CURRENT_PROJECT_VERSION = 20;
+        GENERATE_INFOPLIST_FILE = NO;
+        INFOPLIST_FILE = BiluxWatchWidget/Info.plist;
+        MARKETING_VERSION = 1.0;
+        PRODUCT_BUNDLE_IDENTIFIER = com.bilux.nuclearascension.watchkitapp.nuclearlivewidget;
+        PRODUCT_NAME = "$(TARGET_NAME)";
+        SDKROOT = watchos;
+        SKIP_INSTALL = YES;
+        SUPPORTED_PLATFORMS = "watchos watchsimulator";
+        SWIFT_VERSION = 5.0;
+        TARGETED_DEVICE_FAMILY = 4;
+        WATCHOS_DEPLOYMENT_TARGET = 11.0;
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+    }; name = Debug; };
+		1164D6A9FE2F8D05FB2F5861 /* Release Widget */ = {isa = XCBuildConfiguration; buildSettings = {
+        APPLICATION_EXTENSION_API_ONLY = YES;
+        CODE_SIGN_STYLE = Automatic;
+        CURRENT_PROJECT_VERSION = 20;
+        GENERATE_INFOPLIST_FILE = NO;
+        INFOPLIST_FILE = BiluxWatchWidget/Info.plist;
+        MARKETING_VERSION = 1.0;
+        PRODUCT_BUNDLE_IDENTIFIER = com.bilux.nuclearascension.watchkitapp.nuclearlivewidget;
+        PRODUCT_NAME = "$(TARGET_NAME)";
+        SDKROOT = watchos;
+        SKIP_INSTALL = YES;
+        SUPPORTED_PLATFORMS = "watchos watchsimulator";
+        SWIFT_VERSION = 5.0;
+        TARGETED_DEVICE_FAMILY = 4;
+        WATCHOS_DEPLOYMENT_TARGET = 11.0;
+    }; name = Release; };
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
 		8AC64F79374AFE2C8C5B6B15 = {isa = XCConfigurationList; buildConfigurations = (0E49001574942847AE5AF465 /* Debug */, 54667FDE2D0A0F296B2C6646 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 		F6282F1F8302DEED6C065DE0 = {isa = XCConfigurationList; buildConfigurations = (4CCE5B0B8FA7019988A972E7 /* Debug */, 3C9FCD91081D496CE5DB77E0 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 		3C90C60919DE960F7797C8C5 /* Watch config list */ = {isa = XCConfigurationList; buildConfigurations = (542534529175CF7CD02C9063 /* Debug */, 53494B7E3417A23116B1CD41 /* Release */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+		D9A52CE9712C6311815AC710 /* Widget config list */ = {isa = XCConfigurationList; buildConfigurations = (B789567E655960B29BAF4905 /* Debug Widget */, 1164D6A9FE2F8D05FB2F5861 /* Release Widget */); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 /* End XCConfigurationList section */
 	};
 	rootObject = 439A1489934641902C60A204 /* Project object */;

@@ -34,5 +34,16 @@
 	<array>
 		<string>workout-processing</string>
 	</array>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.bilux.nuclearascension.watchkitapp.nuclearlive</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>biluxwatch</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

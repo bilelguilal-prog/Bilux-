@@ -298,6 +298,13 @@ struct WatchRootView: View {
         }
         .tint(V54ReactorTheme.gold)
         .task { bridge.refresh() }
+        // V6.1.1 : un appui sur le widget ouvre la page, sans lancer HKWorkoutSession.
+        .onOpenURL { url in
+            guard url.scheme?.lowercased() == "biluxwatch",
+                  url.host?.lowercased() == "live" else { return }
+            selectedPage = 5
+            bridge.refresh()
+        }
     }
 
     private var commandPage: some View {
