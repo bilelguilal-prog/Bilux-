@@ -61,6 +61,8 @@ struct BiluxData: Codable {
     // Optional pour que les sauvegardes V4, dépourvues de ce champ, restent lisibles.
     var exerciseLibrary: [String]? = nil
     var longAscensionAnchor: LongAscensionAnchor? = nil
+    // V5.9 : personnalisation purement cosmétique, conservée dans les exports JSON.
+    var legacyLoadout: BILUXV59Loadout? = nil
 }
 
 enum BiluxFormat {
@@ -261,4 +263,13 @@ enum BILUXV55Progression {
                 countThisWeek(checkins, now: now), countThisMonth(workouts, now: now),
                 countThisQuarter(workouts, now: now))
     }
+}
+
+// MARK: - BILUX V5.9 · Nuclear Legacy
+// Optionnel dans BiluxData : les sauvegardes des versions précédentes décodent
+// toujours sans erreur. Aucun impact sur les XP ou les données Apple Santé.
+struct BILUXV59Loadout: Codable {
+    var titleID: String = "initiate"
+    var auraID: String = "core"
+    var crestID: String = "core"
 }

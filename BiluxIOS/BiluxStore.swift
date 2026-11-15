@@ -70,6 +70,26 @@ final class BiluxStore: ObservableObject {
         data.exerciseLibrary?.append(name)
         if saveImmediately { save() }
     }
+    // V5.9 : choix cosmétiques sauvegardés avec le journal, sans XP offert.
+    func equipLegacyTitle(_ id: String) {
+        var loadout = data.legacyLoadout ?? BILUXV59Loadout()
+        loadout.titleID = id
+        data.legacyLoadout = loadout
+        save()
+    }
+    func equipLegacyAura(_ id: String) {
+        var loadout = data.legacyLoadout ?? BILUXV59Loadout()
+        loadout.auraID = id
+        data.legacyLoadout = loadout
+        save()
+    }
+    func equipLegacyCrest(_ id: String) {
+        var loadout = data.legacyLoadout ?? BILUXV59Loadout()
+        loadout.crestID = id
+        data.legacyLoadout = loadout
+        save()
+    }
+
     var totalXP: Int { BILUXV55Progression.totalXP(data) }
     var heroLevel: Int { BILUXV55Progression.heroLevel(data) }
     var unlockedStageIndex: Int { BILUXV55Progression.stageIndex(data) }
@@ -108,6 +128,8 @@ final class BiluxStore: ObservableObject {
             if emptyBeforeImport {
                 data.longAscensionAnchor = result.longAscensionAnchor
                     ?? BILUXV55Progression.makeAnchor(data)
+                // Restaurer aussi les titres, auras et emblèmes depuis un export V5.9.
+                data.legacyLoadout = result.legacyLoadout
             }
             save()
             feedback = "Import terminé : \(result.workouts.count) séances, \(result.meals.count) repas, \(result.checkins.count) bilans et \(result.labs.count) résultats trouvés."

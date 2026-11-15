@@ -613,6 +613,7 @@ struct HomeScreen: View {
     @AppStorage("bilux.lastCelebratedLevel") private var lastCelebratedLevel = 0
     @AppStorage("bilux.equippedTransformationID") private var equippedTransformationID = -1
     @State private var showLevelUp = false
+    @State private var showLegacy = false
     @State private var cinematicStage: NuclearStage? = nil
 
     private var homeStage: NuclearStage {
@@ -639,6 +640,28 @@ struct HomeScreen: View {
                             .background(Nuclear.gold.opacity(0.10), in: Circle())
                     }
                     heroPanel
+                    Button { showLegacy = true } label: {
+                        HStack(spacing: 11) {
+                            Image(systemName: "person.crop.circle.badge.checkmark")
+                                .font(.title2).foregroundStyle(Nuclear.gold)
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("NUCLEAR LEGACY · PROFIL RPG")
+                                    .font(.caption.bold()).tracking(0.6).foregroundStyle(Nuclear.paleGold)
+                                Text("Titres, auras et emblèmes équipables")
+                                    .font(.caption2).foregroundStyle(Nuclear.muted)
+                            }
+                            Spacer(minLength: 3)
+                            Image(systemName: "chevron.right").foregroundStyle(Nuclear.gold)
+                        }
+                        .padding(13)
+                        .frame(maxWidth: .infinity, minHeight: 58)
+                        .background(Nuclear.panel, in: RoundedRectangle(cornerRadius: 15))
+                        .overlay(RoundedRectangle(cornerRadius: 15)
+                            .stroke(Nuclear.gold.opacity(0.48), lineWidth: 1))
+                        .contentShape(RoundedRectangle(cornerRadius: 15))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("bilux.v59.openLegacy.home")
                     SectionCaption(title: "Ton centre de commandement")
                     LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
                         NuclearModuleTile(title: "Sport", detail: "Séances & performances", symbol: "dumbbell.fill", accent: Nuclear.gold) { selectedTab = 1 }
@@ -692,6 +715,9 @@ struct HomeScreen: View {
             .task { if health.hasRequested { await health.refresh() } }
             .onAppear { pulse = true; checkForLevelUp() }
             .onChange(of: journal.heroLevel) { _, _ in checkForLevelUp() }
+            .sheet(isPresented: $showLegacy) {
+                BILUXV59LegacyProfile().environmentObject(journal)
+            }
             .fullScreenCover(isPresented: $showLevelUp) {
                 NuclearLevelUp(level: journal.heroLevel, legacyStage: journal.data.longAscensionAnchor?.legacyStage ?? 0) {
                     lastCelebratedLevel = max(lastCelebratedLevel, journal.heroLevel)
@@ -745,14 +771,23 @@ struct HomeScreen: View {
                             .frame(width: 62, height: 62)
                             .scaleEffect(pulse ? 1.04 : 0.93)
                             .animation((effectsEnabled && !reduceMotion) ? .easeInOut(duration: 6.5).repeatForever(autoreverses: true) : .none, value: pulse)
-                        Image(systemName: "crown.fill")
-                            .font(.system(size: 27)).foregroundStyle(Nuclear.paleGold)
+                        Image(systemName: BILUXV59Legacy.activeCrest(journal).symbol)
+                            .font(.system(size: 27))
+                            .foregroundStyle(BILUXV59Legacy.activeCrest(journal).accent)
                     }
                     Spacer()
-                    Text("RANG · \(journal.rankName.uppercased())")
-                        .font(.caption2.bold()).tracking(0.7).foregroundStyle(Nuclear.paleGold)
-                        .padding(.horizontal, 10).padding(.vertical, 7)
-                        .background(Nuclear.background.opacity(0.77), in: Capsule())
+                    VStack(alignment: .trailing, spacing: 5) {
+                        Text("RANG · \(journal.rankName.uppercased())")
+                            .font(.caption2.bold()).tracking(0.7).foregroundStyle(Nuclear.paleGold)
+                            .padding(.horizontal, 10).padding(.vertical, 7)
+                            .background(Nuclear.background.opacity(0.77), in: Capsule())
+                        Text(BILUXV59Legacy.activeTitle(journal).title)
+                            .font(.system(size: 9, weight: .heavy, design: .rounded))
+                            .foregroundStyle(BILUXV59Legacy.activeAura(journal).accent)
+                            .lineLimit(1).minimumScaleFactor(0.68)
+                            .padding(.horizontal, 9).padding(.vertical, 5)
+                            .background(Nuclear.background.opacity(0.8), in: Capsule())
+                    }
                 }
                 Spacer(minLength: 0)
                 HStack(alignment: .firstTextBaseline, spacing: 7) {
@@ -775,6 +810,10 @@ struct HomeScreen: View {
         .overlay(RoundedRectangle(cornerRadius: 23, style: .continuous)
                     .stroke(LinearGradient(colors: [Nuclear.paleGold, Nuclear.purple.opacity(0.7), Nuclear.gold.opacity(0.4)],
                                            startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.4))
+        .overlay {
+            BILUXV59AuraFrame(aura: BILUXV59Legacy.activeAura(journal), cornerRadius: 23)
+                .allowsHitTesting(false)
+        }
         .shadow(color: Nuclear.gold.opacity(0.17), radius: 18, y: 6)
     }
 
@@ -1043,6 +1082,7 @@ struct AscensionScreen: View {
     @EnvironmentObject private var journal: BiluxStore
     @State private var showingImporter = false
     @State private var showCodex = false
+    @State private var showLegacy = false
     @State private var exportFile: URL?
     @AppStorage("bilux.effectsEnabled") private var effectsEnabled = true
     @AppStorage("bilux.equippedTransformationID") private var equippedTransformationID = -1
@@ -1060,6 +1100,10 @@ struct AscensionScreen: View {
                     .frame(height: 275)
                     .clipShape(RoundedRectangle(cornerRadius: 19))
                     .overlay(RoundedRectangle(cornerRadius: 19).stroke(Nuclear.gold.opacity(0.55), lineWidth: 1))
+                    .overlay {
+                        BILUXV59AuraFrame(aura: BILUXV59Legacy.activeAura(journal), cornerRadius: 19)
+                            .allowsHitTesting(false)
+                    }
                     SectionCaption(title: "Ton ascension")
                     NuclearCard {
                         HStack(spacing: 17) {
@@ -1087,6 +1131,27 @@ struct AscensionScreen: View {
                             .font(.caption).foregroundStyle(Nuclear.muted)
                     }
                     LongAscensionQuestBoard()
+                    SectionCaption(title: "Ton héritage nucléaire")
+                    NuclearCard {
+                        HStack(spacing: 12) {
+                            Image(systemName: BILUXV59Legacy.activeCrest(journal).symbol)
+                                .font(.title2)
+                                .foregroundStyle(BILUXV59Legacy.activeCrest(journal).accent)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(BILUXV59Legacy.activeTitle(journal).title)
+                                    .font(.headline).foregroundStyle(Nuclear.paleGold)
+                                Text("Personnalise ton profil : titres, auras et emblèmes")
+                                    .font(.caption).foregroundStyle(Nuclear.muted)
+                            }
+                        }
+                        Button { showLegacy = true } label: {
+                            Label("OUVRIR LE PROFIL RPG", systemImage: "person.crop.square")
+                                .font(.subheadline.bold())
+                                .frame(maxWidth: .infinity, minHeight: 46)
+                        }
+                        .buttonStyle(.borderedProminent).tint(Nuclear.gold)
+                        .accessibilityIdentifier("bilux.v59.openLegacy.ascension")
+                    }
                     SectionCaption(title: "Le Nuclear Codex")
                     NuclearCard {
                         HStack(alignment: .center, spacing: 13) {
@@ -1222,6 +1287,9 @@ struct AscensionScreen: View {
             }
             .sheet(isPresented: $showCodex) {
                 BILUXV58Codex().environmentObject(journal)
+            }
+            .sheet(isPresented: $showLegacy) {
+                BILUXV59LegacyProfile().environmentObject(journal)
             }
             .fullScreenCover(item: $cinematicStage) { stage in
                 BILUXV57RankCinema(stage: stage, effectsEnabled: effectsEnabled) {
@@ -2155,6 +2223,283 @@ private struct BILUXV58Codex: View {
                     }
                 }
                 .opacity(item.unlocked ? 1 : 0.67)
+            }
+        }
+    }
+}
+
+
+// MARK: - BILUX V5.9 · NUCLEAR LEGACY
+// Le calcul des déblocages réutilise uniquement les exploits du Codex V5.8.
+// Aucun nouveau gain d'XP, aucun accès aux renseignements médicaux.
+private struct BILUXV59Reward: Identifiable {
+    let id: String
+    let title: String
+    let detail: String
+    let symbol: String
+    let accent: Color
+    let unlocked: Bool
+}
+
+private enum BILUXV59Legacy {
+    static func titles(_ journal: BiluxStore) -> [BILUXV59Reward] {
+        let entries = BILUXV58Archive.achievements(journal.data, level: journal.heroLevel)
+        return [BILUXV59Reward(id: "initiate", title: "INITIÉ DU NOYAU",
+                               detail: "Titre de départ", symbol: "bolt.shield.fill",
+                               accent: Nuclear.gold, unlocked: true)]
+            + entries.map { award in
+                BILUXV59Reward(id: award.id, title: award.name,
+                               detail: award.detail, symbol: award.icon,
+                               accent: award.id == "v58-sovereign" || award.id == "v58-ultimate"
+                                   ? Nuclear.paleGold : Nuclear.purple,
+                               unlocked: award.achieved)
+            }
+    }
+
+    static func auras(_ journal: BiluxStore) -> [BILUXV59Reward] {
+        let stage = journal.unlockedStageIndex
+        let guardian = BILUXV58Archive.victories(journal.data, against: .guardian)
+        let sovereign = BILUXV58Archive.victories(journal.data, against: .sovereign)
+        return [
+            .init(id: "core", title: "ÉTINCELLE", detail: "Aura initiale", symbol: "sparkle",
+                  accent: Nuclear.gold, unlocked: true),
+            .init(id: "awakening", title: "AUBE DORÉE", detail: "Débloquer Éveil", symbol: "sun.max.fill",
+                  accent: Nuclear.paleGold, unlocked: stage >= 1),
+            .init(id: "reactor", title: "CŒUR EN FUSION", detail: "Débloquer Réacteur", symbol: "bolt.circle.fill",
+                  accent: .orange, unlocked: stage >= 2),
+            .init(id: "guardian", title: "ORAGE DU NOYAU", detail: "Vaincre une fois le Gardien ou débloquer Nucléaire",
+                  symbol: "bolt.shield.fill", accent: Nuclear.purple, unlocked: guardian > 0 || stage >= 3),
+            .init(id: "sovereign", title: "COURONNE DU NÉANT", detail: "Vaincre le Souverain ou atteindre Ascension",
+                  symbol: "crown.fill", accent: .purple, unlocked: sovereign > 0 || stage >= 4),
+            .init(id: "ultimate", title: "LUMIÈRE ÉTERNELLE", detail: "Atteindre le niveau 100",
+                  symbol: "star.circle.fill", accent: .white, unlocked: journal.heroLevel >= 100)
+        ]
+    }
+
+    static func crests(_ journal: BiluxStore) -> [BILUXV59Reward] {
+        let guardian = BILUXV58Archive.victories(journal.data, against: .guardian)
+        let sovereign = BILUXV58Archive.victories(journal.data, against: .sovereign)
+        return [
+            .init(id: "core", title: "INSIGNE BILUX", detail: "Emblème d'origine", symbol: "crown.fill",
+                  accent: Nuclear.gold, unlocked: true),
+            .init(id: "veteran", title: "MARQUE DU VÉTÉRAN", detail: "25 séances consignées", symbol: "medal.fill",
+                  accent: Nuclear.paleGold, unlocked: journal.data.workouts.count >= 25),
+            .init(id: "guardian", title: "SCEAU DU GARDIEN", detail: "Vaincre le boss mensuel", symbol: "shield.fill",
+                  accent: Nuclear.purple, unlocked: guardian > 0),
+            .init(id: "sovereign", title: "COURONNE DES OMBRES", detail: "Vaincre le boss trimestriel", symbol: "crown.fill",
+                  accent: Nuclear.paleGold, unlocked: sovereign > 0),
+            .init(id: "ultimate", title: "SCEAU DE L'ASCENSION", detail: "Atteindre le niveau 100",
+                  symbol: "star.circle.fill", accent: .white, unlocked: journal.heroLevel >= 100)
+        ]
+    }
+
+    private static func equipped(_ items: [BILUXV59Reward], _ id: String?) -> BILUXV59Reward {
+        items.first(where: { $0.id == id && $0.unlocked }) ?? items[0]
+    }
+    static func activeTitle(_ journal: BiluxStore) -> BILUXV59Reward {
+        equipped(titles(journal), journal.data.legacyLoadout?.titleID)
+    }
+    static func activeAura(_ journal: BiluxStore) -> BILUXV59Reward {
+        equipped(auras(journal), journal.data.legacyLoadout?.auraID)
+    }
+    static func activeCrest(_ journal: BiluxStore) -> BILUXV59Reward {
+        equipped(crests(journal), journal.data.legacyLoadout?.crestID)
+    }
+}
+
+// La bordure ne redimensionne ni ne recadre jamais les portraits de V5.3.2.
+// Les effets sont statiques et ne capturent aucune interaction tactile.
+private struct BILUXV59AuraFrame: View {
+    let aura: BILUXV59Reward
+    let cornerRadius: CGFloat
+
+    var body: some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .stroke(aura.accent.opacity(aura.id == "core" ? 0.20 : 0.88), lineWidth: aura.id == "core" ? 1 : 2.4)
+            .shadow(color: aura.accent.opacity(aura.id == "core" ? 0.03 : 0.58),
+                    radius: aura.id == "core" ? 2 : 14)
+            .overlay {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .inset(by: 5)
+                    .stroke(aura.accent.opacity(aura.id == "core" ? 0.06 : 0.22), lineWidth: 1)
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+}
+
+private struct BILUXV59LegacyProfile: View {
+    @EnvironmentObject private var journal: BiluxStore
+    @Environment(\.dismiss) private var dismiss
+
+    private var titles: [BILUXV59Reward] { BILUXV59Legacy.titles(journal) }
+    private var auras: [BILUXV59Reward] { BILUXV59Legacy.auras(journal) }
+    private var crests: [BILUXV59Reward] { BILUXV59Legacy.crests(journal) }
+    private var guardianVictories: Int { BILUXV58Archive.victories(journal.data, against: .guardian) }
+    private var sovereignVictories: Int { BILUXV58Archive.victories(journal.data, against: .sovereign) }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView(showsIndicators: false) {
+                VStack(alignment: .leading, spacing: 20) {
+                    profileHeader
+                    SectionCaption(title: "Titres de légende")
+                    Text("Équipe un titre déjà acquis dans la Salle des trophées. Aucun bonus d'XP n'est ajouté.")
+                        .font(.caption).foregroundStyle(Nuclear.muted)
+                    VStack(spacing: 9) {
+                        ForEach(titles) { item in
+                            equipRow(item, equipped: BILUXV59Legacy.activeTitle(journal).id == item.id) {
+                                journal.equipLegacyTitle(item.id)
+                            }
+                        }
+                    }
+                    SectionCaption(title: "Auras évolutives")
+                    Text("L'effet choisi embellit tes portraits sans remplacer leurs illustrations ni accélérer ta progression.")
+                        .font(.caption).foregroundStyle(Nuclear.muted)
+                    VStack(spacing: 9) {
+                        ForEach(auras) { item in
+                            equipRow(item, equipped: BILUXV59Legacy.activeAura(journal).id == item.id) {
+                                journal.equipLegacyAura(item.id)
+                            }
+                        }
+                    }
+                    SectionCaption(title: "Emblèmes équipables")
+                    VStack(spacing: 9) {
+                        ForEach(crests) { item in
+                            equipRow(item, equipped: BILUXV59Legacy.activeCrest(journal).id == item.id) {
+                                journal.equipLegacyCrest(item.id)
+                            }
+                        }
+                    }
+                    SectionCaption(title: "Reliques des Gardiens")
+                    relicCard(name: "SCEAU DU RÉACTEUR", bossName: "Gardien du Réacteur",
+                              imageName: "BILUXBossGuardian", victories: guardianVictories, color: Nuclear.purple)
+                    relicCard(name: "COURONNE DU NÉANT", bossName: "Souverain du Néant",
+                              imageName: "BILUXBossSovereign", victories: sovereignVictories, color: Nuclear.gold)
+                    Text("Les reliques sont attribuées d'après les victoires du Codex depuis la V5.5. Elles n'apportent ni XP supplémentaire ni avantage sportif.")
+                        .font(.caption2).foregroundStyle(Nuclear.muted)
+                    Text("Profil sauvegardé dans ton fichier JSON BILUX. Les jours de repos n'entraînent aucune pénalité.")
+                        .font(.caption2).foregroundStyle(Nuclear.muted)
+                        .padding(.bottom, 10)
+                }
+                .padding(16)
+            }
+            .modifier(PageBackground())
+            .navigationTitle("Héritage")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Fermer") { dismiss() }
+                        .tint(Nuclear.gold)
+                }
+            }
+        }
+    }
+
+    private var profileHeader: some View {
+        NuclearCard {
+            HStack(spacing: 14) {
+                Image(NuclearStage.all[journal.unlockedStageIndex].artwork)
+                    .resizable().scaledToFill()
+                    .frame(width: 110, height: 152)
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .allowsHitTesting(false)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("NUCLEAR LEGACY · V5.9")
+                        .font(.system(size: 10, weight: .heavy)).tracking(1)
+                        .foregroundStyle(Nuclear.gold)
+                    Text(journal.data.heroName.uppercased())
+                        .font(.title2.bold()).foregroundStyle(.white)
+                        .lineLimit(1).minimumScaleFactor(0.6)
+                    Text(BILUXV59Legacy.activeTitle(journal).title)
+                        .font(.caption.bold()).foregroundStyle(Nuclear.paleGold)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Label("NIV. \(journal.heroLevel) · \(journal.rankName)", systemImage: "bolt.shield.fill")
+                        .font(.caption).foregroundStyle(Nuclear.muted)
+                    Label(BILUXV59Legacy.activeAura(journal).title, systemImage: "sparkles")
+                        .font(.caption2).foregroundStyle(BILUXV59Legacy.activeAura(journal).accent)
+                }
+                Spacer(minLength: 0)
+            }
+            HStack(spacing: 8) {
+                statPill("XP", "\(journal.totalXP)")
+                statPill("SÉANCES", "\(journal.data.workouts.count)")
+                statPill("VICTOIRES", "\(guardianVictories + sovereignVictories)")
+            }
+            ProgressView(value: journal.xpFraction).tint(Nuclear.gold)
+            Text(journal.heroLevel >= 100 ? "MAÎTRISE ULTIME" : "Encore \(journal.xpToNextLevel) XP jusqu'au prochain niveau")
+                .font(.caption2).foregroundStyle(Nuclear.muted)
+        }
+    }
+
+    private func statPill(_ title: String, _ value: String) -> some View {
+        VStack(spacing: 4) {
+            Text(value).font(.headline.monospacedDigit()).foregroundStyle(.white)
+            Text(title).font(.system(size: 9, weight: .heavy)).foregroundStyle(Nuclear.muted)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .background(Nuclear.background.opacity(0.55), in: RoundedRectangle(cornerRadius: 11))
+    }
+
+    private func equipRow(_ item: BILUXV59Reward, equipped: Bool, action: @escaping () -> Void) -> some View {
+        Button {
+            guard item.unlocked else { return }
+            action()
+        } label: {
+            HStack(spacing: 13) {
+                Image(systemName: item.unlocked ? item.symbol : "lock.fill")
+                    .font(.title3).foregroundStyle(item.unlocked ? item.accent : Nuclear.muted)
+                    .frame(width: 32)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(item.unlocked ? item.title : "RÉCOMPENSE VERROUILLÉE")
+                        .font(.system(size: 12, weight: .heavy, design: .rounded))
+                        .foregroundStyle(item.unlocked ? .white : Nuclear.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Text(item.detail)
+                        .font(.caption2).foregroundStyle(Nuclear.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 5)
+                Image(systemName: equipped ? "checkmark.circle.fill" : (item.unlocked ? "circle" : "lock.fill"))
+                    .foregroundStyle(equipped ? Nuclear.gold : Nuclear.muted)
+            }
+            .padding(.horizontal, 13).padding(.vertical, 12)
+            .frame(maxWidth: .infinity, minHeight: 66)
+            .background(equipped ? item.accent.opacity(0.15) : Nuclear.panel,
+                        in: RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14)
+                .stroke(equipped ? item.accent.opacity(0.8) : Nuclear.purple.opacity(0.18), lineWidth: 1))
+            .contentShape(RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(.plain)
+        .disabled(!item.unlocked || equipped)
+        .accessibilityLabel(item.title + (equipped ? ", équipé" : (item.unlocked ? ", équiper" : ", verrouillé")))
+    }
+
+    private func relicCard(name: String, bossName: String, imageName: String,
+                           victories: Int, color: Color) -> some View {
+        NuclearCard {
+            HStack(spacing: 12) {
+                Image(imageName)
+                    .resizable().scaledToFill()
+                    .frame(width: 100, height: 110)
+                    .clipped()
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .saturation(victories > 0 ? 1 : 0.15)
+                    .allowsHitTesting(false)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(victories > 0 ? name : "RELIQUE SCELLÉE")
+                        .font(.headline.bold())
+                        .foregroundStyle(victories > 0 ? color : Nuclear.muted)
+                    Text(bossName)
+                        .font(.caption).foregroundStyle(.white)
+                    Label(victories > 0 ? "\(victories) victoire\(victories > 1 ? "s" : "")" : "À débloquer",
+                          systemImage: victories > 0 ? "checkmark.seal.fill" : "lock.fill")
+                        .font(.caption2.bold()).foregroundStyle(victories > 0 ? Nuclear.paleGold : Nuclear.muted)
+                }
+                Spacer(minLength: 0)
             }
         }
     }
