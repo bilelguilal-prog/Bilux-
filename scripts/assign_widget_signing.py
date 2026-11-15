@@ -81,7 +81,33 @@ def apply_widget_profile(name: str, team: str) -> None:
     if not PROJECT.is_file():
         fail(f'Xcode project missing: {PROJECT}')
     content = PROJECT.read_text(encoding='utf-8')
-    pat = re.compile(r'(?P<start>\b[A-F0-9]{24} /\* Release Widget \*/ = \{isa = XCBuildConfiguration; buildSettings = \{)(?P<body>.*?)(?P<end>\}; name = Release; \};)', re.S)
+    # Identifier la vraie configuration Release depuis les références Xcode,
+    # sans supposer que le commentaire s'appelle "Release Widget".
+    import json
+    info = subprocess.run(
+        ['plutil', '-convert', 'json', '-o', '-', str(PROJECT)],
+        capture_output=True, text=True
+    )
+    if info.returncode != 0:
+        fail('Impossible de lire la structure du projet Xcode : ' + info.stderr[:500])
+    objects = json.loads(info.stdout)['objects']
+    widget_targets = [obj for obj in objects.values()
+                      if obj.get('isa') == 'PBXNativeTarget'
+                      and obj.get('name') == 'BiluxWatchWidget']
+    if len(widget_targets) != 1:
+        fail('La cible BiluxWatchWidget est absente ou en double')
+    configs = objects[widget_targets[0]['buildConfigurationList']]['buildConfigurations']
+    release_ids = [cid for cid in configs if objects[cid].get('name') == 'Release']
+    if len(release_ids) != 1:
+        fail('Configuration Release introuvable ou en double dans BiluxWatchWidget')
+    release_id = release_ids[0]
+    print('✅ Configuration Release du widget identifiée : ' + release_id)
+    pat = re.compile(
+        rf'(?P<start>^[ \t]*{re.escape(release_id)}[^\n]*=\s*\{{\s*isa\s*=\s*XCBuildConfiguration\s*;\s*buildSettings\s*=\s*\{{)'
+        r'(?P<body>.*?)'
+        r'(?P<end>\}\s*;\s*name\s*=\s*Release\s*;\s*\}\s*;)',
+        re.S | re.M
+    )
     matches = list(pat.finditer(content))
     if len(matches) != 1:
         fail(f'Expected exactly one BiluxWatchWidget Release configuration; got {len(matches)}')
