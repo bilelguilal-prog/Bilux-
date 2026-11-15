@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 import UIKit
 import Vision
 import CoreImage
+import AVFoundation
 
 // BILUX V5.1 — nouveau langage visuel, sans modification du modèle de données.
 private enum Nuclear {
@@ -1121,6 +1122,7 @@ struct HomeScreen: View {
     @State private var showLevelUp = false
     @State private var showLegacy = false
     @State private var cinematicStage: NuclearStage? = nil
+    @State private var showImmersion = false
 
     private var homeStage: NuclearStage {
         NuclearStage.all.first(where: { $0.id == equippedTransformationID && $0.id <= journal.unlockedStageIndex })
@@ -1146,6 +1148,14 @@ struct HomeScreen: View {
                             .background(Nuclear.gold.opacity(0.10), in: Circle())
                     }
                     heroPanel
+                    Button { showImmersion = true } label: {
+                        Label("CONTEMPLER MON PERSONNAGE", systemImage: "viewfinder")
+                            .font(.subheadline.bold())
+                            .frame(maxWidth: .infinity, minHeight: 45)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(Nuclear.paleGold)
+                    .accessibilityIdentifier("bilux.v67.openImmersion.home")
                     Button { showLegacy = true } label: {
                         HStack(spacing: 11) {
                             Image(systemName: "person.crop.circle.badge.checkmark")
@@ -1229,6 +1239,12 @@ struct HomeScreen: View {
                     lastCelebratedLevel = max(lastCelebratedLevel, journal.heroLevel)
                     showLevelUp = false
                 }
+            }
+            .fullScreenCover(isPresented: $showImmersion) {
+                BILUXV67Contemplation(stage: homeStage, level: journal.heroLevel,
+                    masteryCount: V63MasterySnapshot.evaluate(journal.data).unlockedTotal,
+                    dominantPath: V64StormMastery.dominantPath(journal.data),
+                    effectsEnabled: effectsEnabled) { showImmersion = false }
             }
             .fullScreenCover(item: $cinematicStage) { stage in
                 BILUXV57RankCinema(stage: stage, effectsEnabled: effectsEnabled) {
@@ -1610,6 +1626,8 @@ struct AscensionScreen: View {
     @AppStorage("bilux.equippedTransformationID") private var equippedTransformationID = -1
     @State private var selectedStage = 0
     @State private var cinematicStage: NuclearStage? = nil
+    @State private var showImmersion = false
+    @AppStorage("bilux.v67.soundEnabled") private var immersionSound = false
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -1630,6 +1648,15 @@ struct AscensionScreen: View {
                         BILUXV59AuraFrame(aura: BILUXV59Legacy.activeAura(journal), cornerRadius: 19)
                             .allowsHitTesting(false)
                     }
+                    Button { showImmersion = true } label: {
+                        Label("MODE CONTEMPLATION · PLEIN ÉCRAN", systemImage: "viewfinder")
+                            .font(.subheadline.bold())
+                            .frame(maxWidth: .infinity, minHeight: 46)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Nuclear.gold)
+                    .disabled(selectedStage > journal.unlockedStageIndex)
+                    .accessibilityIdentifier("bilux.v67.openImmersion.ascension")
                     SectionCaption(title: "Ton ascension")
                     NuclearCard {
                         HStack(spacing: 17) {
@@ -1781,7 +1808,11 @@ struct AscensionScreen: View {
                     SectionCaption(title: "Effets visuels")
                     NuclearCard {
                         Toggle("Animations nucléaires", isOn: $effectsEnabled).tint(Nuclear.gold)
-                        Text("CINEMATIC STORM · V6.6")
+                        Toggle("Ambiance sonore cinématique", isOn: $immersionSound)
+                            .tint(Nuclear.gold)
+                        Text("Sons nucléaires originaux, optionnels et désactivés par défaut. Le mode Silence de l’iPhone est respecté. Aucun son en arrière-plan.")
+                            .font(.caption2).foregroundStyle(Nuclear.muted)
+                        Text("NUCLEAR IMMERSION · V6.7")
                             .font(.caption.bold()).foregroundStyle(Nuclear.gold)
                         Picker("Intensité de l'orage", selection: $stormIntensity) {
                             Text("Équilibré").tag("balanced")
@@ -1826,6 +1857,13 @@ struct AscensionScreen: View {
             }
             .sheet(isPresented: $showLegacy) {
                 BILUXV59LegacyProfile().environmentObject(journal)
+            }
+            .fullScreenCover(isPresented: $showImmersion) {
+                BILUXV67Contemplation(stage: NuclearStage.all[selectedStage],
+                    level: journal.heroLevel,
+                    masteryCount: V63MasterySnapshot.evaluate(journal.data).unlockedTotal,
+                    dominantPath: V64StormMastery.dominantPath(journal.data),
+                    effectsEnabled: effectsEnabled) { showImmersion = false }
             }
             .fullScreenCover(item: $cinematicStage) { stage in
                 BILUXV57RankCinema(stage: stage, effectsEnabled: effectsEnabled) {
@@ -2161,94 +2199,381 @@ private struct BILUXV56BossBattle: View {
 
 // MARK: - BILUX V5.7 · NUCLEAR AWAKENING
 // Présentation uniquement : aucun ajout d'XP, aucun changement du journal ou de HealthKit.
-private struct BILUXV57RankCinema: View {
+// MARK: - BILUX V6.7 · NUCLEAR IMMERSION
+// Purely visual and optional audio: never reads/writes the workout journal or XP.
+// Reuses the existing V6.6 storm engine, V6.5 foreground depth, and V5.7 cinematics.
+
+private enum BILUXV67Sound: Hashable {
+    case awakening
+    case impact
+    case reactor
+
+    var duration: Double {
+        switch self {
+        case .awakening: return 2.2
+        case .impact: return 1.45
+        case .reactor: return 0.90
+        }
+    }
+}
+
+@MainActor
+private final class BILUXV67Audio: ObservableObject {
+    private var player: AVAudioPlayer?
+    private var generated: [BILUXV67Sound: Data] = [:]
+
+    func play(_ kind: BILUXV67Sound, enabled: Bool) {
+        guard enabled else { return }
+        do {
+            // Ambient respects iPhone silent mode and mixes with other audio.
+            try AVAudioSession.sharedInstance().setCategory(.ambient)
+            let audio = generated[kind] ?? Self.makeWAV(kind)
+            if generated[kind] == nil { generated[kind] = audio }
+            let next = try AVAudioPlayer(data: audio)
+            next.volume = kind == .impact ? 0.36 : 0.26
+            player?.stop()
+            player = next
+            next.prepareToPlay()
+            next.play()
+        } catch {
+            // An audio failure never prevents use of the app or the cinema.
+        }
+    }
+
+    func stop() { player?.stop(); player = nil }
+
+    // Original short, synthetic thunder/energy sounds. No bundled media, no network.
+    private static func makeWAV(_ kind: BILUXV67Sound) -> Data {
+        let sampleRate = 22_050
+        let totalFrames = Int(kind.duration * Double(sampleRate))
+        let sampleBytes = UInt32(totalFrames * 2)
+        var data = Data(capacity: 44 + Int(sampleBytes))
+        func appendTag(_ string: String) { data.append(contentsOf: string.utf8) }
+        func append16(_ value: UInt16) {
+            data.append(UInt8(truncatingIfNeeded: value))
+            data.append(UInt8(truncatingIfNeeded: value >> 8))
+        }
+        func append32(_ value: UInt32) {
+            data.append(UInt8(truncatingIfNeeded: value))
+            data.append(UInt8(truncatingIfNeeded: value >> 8))
+            data.append(UInt8(truncatingIfNeeded: value >> 16))
+            data.append(UInt8(truncatingIfNeeded: value >> 24))
+        }
+        appendTag("RIFF"); append32(36 + sampleBytes); appendTag("WAVE")
+        appendTag("fmt "); append32(16); append16(1); append16(1)
+        append32(UInt32(sampleRate)); append32(UInt32(sampleRate * 2))
+        append16(2); append16(16); appendTag("data"); append32(sampleBytes)
+        var seed: UInt64 = 0xCBF29CE484222325
+        var lowNoise = 0.0
+        for index in 0..<totalFrames {
+            let t = Double(index) / Double(sampleRate)
+            seed = seed &* 2862933555777941757 &+ 3037000493
+            let whiteNoise = Double((seed >> 32) & 0xFFFF_FFFF) / 4_294_967_295.0 * 2 - 1
+            lowNoise = lowNoise * 0.985 + whiteNoise * 0.015
+            let falloff = pow(max(0.0, 1.0 - t / kind.duration), 1.6)
+            let attack = min(1.0, t / (kind == .impact ? 0.018 : 0.095))
+            let bass = sin(2 * Double.pi * (51 * t + 3.8 * t * t))
+            let drone = sin(2 * Double.pi * 92 * t) * sin(2 * Double.pi * 1.5 * t)
+            let noiseLevel = kind == .impact ? 2.2 : 1.45
+            let level = (bass * 0.35 + drone * 0.12 + lowNoise * noiseLevel + whiteNoise * 0.045)
+                * falloff * attack
+            let bounded = max(-1.0, min(1.0, level))
+            let sample = Int16(Int((bounded * 24_000.0).rounded()))
+            append16(UInt16(bitPattern: sample))
+        }
+        return data
+    }
+}
+
+// Slowly breathing energy plus a one-second manual discharge; not another strobe.
+private struct BILUXV67ReactorHalo: View {
+    let accent: Color
+    let active: Bool
+    let lastImpulse: Date
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 20.0,
+                                paused: !active || reduceMotion)) { tick in
+            let clock = tick.date.timeIntervalSinceReferenceDate
+            let breath = active && !reduceMotion ? (sin(clock * 1.65) + 1) * 0.5 : 0.2
+            let elapsed = tick.date.timeIntervalSince(lastImpulse)
+            let impulse = active && !reduceMotion ? max(0.0, 1.0 - max(0, elapsed) / 1.1) : 0.0
+            ZStack {
+                Circle()
+                    .fill(RadialGradient(colors: [accent.opacity(0.26 + breath * 0.12 + impulse * 0.24),
+                                                  accent.opacity(0.065), .clear],
+                                         center: .center, startRadius: 4, endRadius: 130))
+                Circle()
+                    .stroke(accent.opacity(0.40 + breath * 0.21 + impulse * 0.27),
+                            lineWidth: 2.0 + impulse * 2.2)
+                    .padding(45)
+                    .scaleEffect(CGFloat(0.96 + breath * 0.055 + impulse * 0.13))
+                Circle()
+                    .trim(from: 0.09, to: 0.61)
+                    .stroke(AngularGradient(colors: [.clear, accent, Nuclear.paleGold, .clear],
+                                            center: .center),
+                            style: StrokeStyle(lineWidth: 2.2, lineCap: .round))
+                    .rotationEffect(.degrees(active && !reduceMotion ? clock * 8 : 0))
+                    .padding(64)
+                    .opacity(0.43 + breath * 0.27)
+                if impulse > 0.01 {
+                    Circle()
+                        .stroke(Nuclear.paleGold.opacity(impulse * 0.70), lineWidth: 1.9)
+                        .scaleEffect(CGFloat(0.34 + (1.0 - impulse) * 0.88))
+                        .padding(35)
+                }
+            }
+            .compositingGroup()
+            .blendMode(.screen)
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
+// The avatar can be contemplated without toolbars, and tapped to release an
+// energy pulse. The exit button stays visible for discoverability/accessibility.
+private struct BILUXV67Contemplation: View {
     let stage: NuclearStage
+    let level: Int
+    let masteryCount: Int
+    let dominantPath: String
     let effectsEnabled: Bool
     let onDismiss: () -> Void
 
+    @AppStorage("bilux.v64.stormIntensity") private var stormIntensity = "epic"
+    @AppStorage("bilux.v67.soundEnabled") private var soundEnabled = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var phase = 0
+    @Environment(\.scenePhase) private var scenePhase
+    @StateObject private var audio = BILUXV67Audio()
+    @State private var lastImpulse = Date.distantPast
+    @State private var showControls = true
 
     private var animated: Bool { effectsEnabled && !reduceMotion }
 
     var body: some View {
         GeometryReader { geometry in
+            let w = geometry.size.width
+            let h = geometry.size.height
             ZStack {
                 Nuclear.background.ignoresSafeArea()
-                // V5.3.2 : portrait dans un cadre fixe, jamais de scaleEffect sur la photo.
                 Image(stage.artwork)
                     .resizable().scaledToFill()
-                    .frame(width: geometry.size.width, height: geometry.size.height)
-                    .clipped()
-                    .accessibilityHidden(true)
-
-                LinearGradient(colors: [Nuclear.background.opacity(0.25), .clear,
-                                        Nuclear.background.opacity(0.65), Nuclear.background],
-                               startPoint: .top, endPoint: .bottom)
-                    .ignoresSafeArea()
-                RadialGradient(colors: [stage.accent.opacity(phase >= 2 ? 0.37 : 0.10), .clear],
-                               center: .center, startRadius: 25, endRadius: 340)
-                    .blendMode(.screen)
-                    .allowsHitTesting(false)
+                    .frame(width: w, height: h)
+                    .clipped().accessibilityHidden(true)
                 if animated {
                     V65DepthCompositing(artwork: stage.artwork, stage: stage.id,
-                                        masteryCount: 0, dominantPath: "core",
-                                        epic: true,
-                                        width: geometry.size.width,
-                                        height: geometry.size.height)
+                                        masteryCount: masteryCount, dominantPath: dominantPath,
+                                        epic: stormIntensity != "balanced", width: w, height: h)
                 }
+                BILUXV67ReactorHalo(accent: stage.accent, active: animated,
+                                    lastImpulse: lastImpulse)
+                    .frame(width: min(w * 0.68, 290), height: min(w * 0.68, 290))
+                    .position(x: w * 0.52, y: h * 0.74)
+                LinearGradient(colors: [Nuclear.background.opacity(0.51), .clear,
+                                        .clear, Nuclear.background.opacity(0.76)],
+                               startPoint: .top, endPoint: .bottom)
+                    .allowsHitTesting(false)
+                Button(action: unleash) {
+                    Circle().fill(.clear)
+                        .frame(width: min(w * 0.52, 220), height: min(w * 0.52, 220))
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .position(x: w * 0.52, y: h * 0.74)
+                .accessibilityLabel("Déclencher une impulsion du réacteur")
+                .accessibilityIdentifier("bilux.v67.reactorPulse")
 
                 VStack(spacing: 12) {
-                    Text("BILUX · ÉVEIL NUCLÉAIRE")
-                        .font(.system(size: 11, weight: .black, design: .rounded))
-                        .tracking(3).foregroundStyle(Nuclear.paleGold)
-                        .padding(.top, 48)
+                    HStack {
+                        if showControls {
+                            Text("NUCLEAR IMMERSION")
+                                .font(.system(size: 10, weight: .heavy))
+                                .tracking(2.0).foregroundStyle(Nuclear.paleGold)
+                        }
+                        Spacer()
+                        Button(action: onDismiss) {
+                            Label("FERMER", systemImage: "xmark.circle.fill")
+                                .font(.caption.bold()).foregroundStyle(.white)
+                                .padding(10)
+                                .background(.black.opacity(0.64), in: Capsule())
+                        }
+                        .accessibilityIdentifier("bilux.v67.closeImmersion")
+                    }
+                    .padding(.top, 13)
+                    Spacer()
+                    if showControls {
+                        Text("RANG " + stage.name)
+                            .font(.system(size: 13, weight: .black)).tracking(3.0)
+                            .foregroundStyle(stage.accent)
+                        Text("NIVEAU \(level)")
+                            .font(.system(size: 25, weight: .black, design: .rounded))
+                            .foregroundStyle(.white)
+                        Text("TOUCHE LE RÉACTEUR POUR LIBÉRER UNE IMPULSION")
+                            .font(.system(size: 9, weight: .semibold))
+                            .tracking(0.9).multilineTextAlignment(.center)
+                            .foregroundStyle(Nuclear.paleGold)
+                        HStack(spacing: 12) {
+                            Button { unleash() } label: {
+                                Label("DÉCHARGE", systemImage: "bolt.fill")
+                            }
+                            Button { soundEnabled.toggle(); if !soundEnabled { audio.stop() } } label: {
+                                Image(systemName: soundEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                            }
+                            .accessibilityLabel(soundEnabled ? "Couper les sons" : "Activer les sons")
+                        }
+                        .font(.subheadline.bold())
+                        .buttonStyle(.borderedProminent)
+                        .tint(stage.accent)
+                        .padding(.top, 7)
+                    }
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.24)) { showControls.toggle() }
+                    } label: {
+                        Label(showControls ? "MASQUER L'INTERFACE" : "AFFICHER L'INTERFACE",
+                              systemImage: showControls ? "eye.slash" : "eye")
+                            .font(.system(size: 10, weight: .bold))
+                    }
+                    .buttonStyle(.bordered).tint(Nuclear.paleGold)
+                    .padding(.bottom, 22)
+                }
+                .padding(.horizontal, 22)
+            }
+            .frame(width: w, height: h)
+            .clipped()
+        }
+        .background(Nuclear.background)
+        .onAppear { audio.play(.awakening, enabled: soundEnabled) }
+        .onDisappear { audio.stop() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { audio.stop() }
+        }
+        .accessibilityLabel("Mode contemplation du rang \(stage.name)")
+    }
+
+    private func unleash() {
+        guard animated else { return }
+        lastImpulse = .now
+        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+        audio.play(.reactor, enabled: soundEnabled)
+    }
+}
+
+// Three-beat reveal: ignition, compression, then emergence. It is also used for
+// replays of unlocked transformations; replays never award any new XP.
+private struct BILUXV57RankCinema: View {
+    let stage: NuclearStage
+    let effectsEnabled: Bool
+    let onDismiss: () -> Void
+
+    @AppStorage("bilux.v67.soundEnabled") private var soundEnabled = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
+    @StateObject private var audio = BILUXV67Audio()
+    @State private var phase = 0
+    @State private var lastImpulse = Date.distantPast
+
+    private var animated: Bool { effectsEnabled && !reduceMotion }
+
+    var body: some View {
+        GeometryReader { geometry in
+            let w = geometry.size.width
+            let h = geometry.size.height
+            ZStack {
+                Nuclear.background.ignoresSafeArea()
+                Image(stage.artwork)
+                    .resizable().scaledToFill()
+                    .frame(width: w, height: h)
+                    .clipped()
+                    .accessibilityHidden(true)
+                if animated && phase >= 1 {
+                    V65DepthCompositing(artwork: stage.artwork, stage: stage.id,
+                                        masteryCount: 0, dominantPath: "core", epic: true,
+                                        width: w, height: h)
+                }
+                BILUXV67ReactorHalo(accent: stage.accent, active: animated && phase >= 1,
+                                    lastImpulse: lastImpulse)
+                    .frame(width: min(w * 0.69, 290), height: min(w * 0.69, 290))
+                    .position(x: w * 0.52, y: h * 0.74)
+                LinearGradient(colors: [Nuclear.background.opacity(phase == 0 ? 0.75 : 0.33),
+                                        .clear, Nuclear.background.opacity(0.56), Nuclear.background],
+                               startPoint: .top, endPoint: .bottom)
+                    .ignoresSafeArea()
+                VStack(spacing: 13) {
+                    HStack {
+                        Text("BILUX · NUCLEAR IMMERSION")
+                            .font(.system(size: 10, weight: .black)).tracking(2.2)
+                            .foregroundStyle(Nuclear.paleGold)
+                        Spacer()
+                        Button("PASSER") { audio.stop(); onDismiss() }
+                            .font(.caption.bold()).foregroundStyle(.white)
+                            .padding(9)
+                            .background(.black.opacity(0.60), in: Capsule())
+                            .accessibilityIdentifier("bilux.v67.skipCinema")
+                    }
+                    .padding(.top, 20)
                     Spacer()
                     Image(systemName: stage.symbol)
-                        .font(.system(size: 42, weight: .semibold))
+                        .font(.system(size: 50, weight: .black))
                         .foregroundStyle(stage.accent)
-                        .shadow(color: stage.accent.opacity(0.8), radius: phase >= 2 ? 25 : 6)
-                        .scaleEffect(phase >= 2 ? 1 : 0.75)
-                    Text(phase >= 2 ? "TRANSFORMATION RÉVÉLÉE" : "LE RÉACTEUR S'ÉVEILLE")
-                        .font(.system(size: 11, weight: .black))
-                        .tracking(2).foregroundStyle(Nuclear.paleGold)
+                        .shadow(color: stage.accent.opacity(0.82), radius: phase >= 2 ? 25 : 7)
+                        .scaleEffect(phase >= 2 ? 1.0 : 0.82)
+                    Text(phase < 2 ? "LE NOYAU SE CHARGE" : "TRANSFORMATION RÉVÉLÉE")
+                        .font(.system(size: 11, weight: .black)).tracking(2)
+                        .foregroundStyle(Nuclear.paleGold)
                     Text(stage.name)
-                        .font(.system(size: 37, weight: .black, design: .rounded))
-                        .minimumScaleFactor(0.55).lineLimit(1)
+                        .font(.system(size: 40, weight: .black, design: .rounded))
                         .foregroundStyle(.white)
-                        .shadow(color: stage.accent.opacity(0.9), radius: 14)
+                        .minimumScaleFactor(0.60).lineLimit(1)
+                        .shadow(color: stage.accent.opacity(0.7), radius: 12)
                     Text("RANG · NIVEAU \(stage.minLevel)+")
-                        .font(.caption.bold()).tracking(2).foregroundStyle(stage.accent)
+                        .font(.caption.bold()).tracking(1.5).foregroundStyle(stage.accent)
                     Text(stage.subtitle)
-                        .font(.subheadline).foregroundStyle(.white.opacity(0.9))
-                    Button(action: onDismiss) {
+                        .font(.subheadline).foregroundStyle(.white.opacity(0.85))
+                    Button {
+                        audio.stop(); onDismiss()
+                    } label: {
                         Label("CONTINUER L'ASCENSION", systemImage: "bolt.shield.fill")
-                            .font(.headline.bold()).frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
+                            .frame(maxWidth: .infinity).padding(.vertical, 8)
                     }
                     .buttonStyle(.borderedProminent).tint(Nuclear.gold)
-                    .padding(.top, 21)
+                    .disabled(animated && phase < 3)
+                    .opacity(animated && phase < 3 ? 0.56 : 1)
+                    .padding(.top, 18)
                     .accessibilityIdentifier("bilux.v57.closeRankCinema")
-                    Spacer().frame(height: 36)
+                    Spacer().frame(height: 32)
                 }
-                .padding(.horizontal, 27)
+                .padding(.horizontal, 25)
                 .multilineTextAlignment(.center)
-                .opacity(phase >= 1 ? 1 : 0.25)
+                .opacity(animated && phase == 0 ? 0.50 : 1)
             }
-            .frame(width: geometry.size.width, height: geometry.size.height)
+            .frame(width: w, height: h)
+            .clipped()
         }
         .background(Nuclear.background)
         .task {
             guard animated else { phase = 3; return }
-            withAnimation(.easeOut(duration: 1.1)) { phase = 1 }
-            try? await Task.sleep(nanoseconds: 1_100_000_000)
+            audio.play(.awakening, enabled: soundEnabled)
+            try? await Task.sleep(nanoseconds: 580_000_000)
             guard !Task.isCancelled else { return }
-            withAnimation(.easeInOut(duration: 1.9)) { phase = 2 }
+            withAnimation(.easeOut(duration: 0.65)) { phase = 1 }
+            try? await Task.sleep(nanoseconds: 900_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.72)) { phase = 2; lastImpulse = .now }
+            UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+            audio.play(.impact, enabled: soundEnabled)
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.45)) { phase = 3 }
+        }
+        .onDisappear { audio.stop() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active { audio.stop() }
         }
         .accessibilityLabel("Cinématique de transformation, rang \(stage.name)")
     }
 }
-
 private struct BILUXV57BossPortrait: View {
     let boss: BILUXV56Boss
     let defeated: Bool
