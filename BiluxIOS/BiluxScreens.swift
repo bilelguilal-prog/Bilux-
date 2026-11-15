@@ -2308,6 +2308,12 @@ private enum BILUXV59Legacy {
     }
 }
 
+// Accessible depuis WatchPhoneBridge, sans exposer les catalogues cosmétiques.
+@MainActor
+func BILUXV60WatchAppearance(_ journal: BiluxStore) -> (title: String, aura: String) {
+    (BILUXV59Legacy.activeTitle(journal).title, BILUXV59Legacy.activeAura(journal).title)
+}
+
 // La bordure ne redimensionne ni ne recadre jamais les portraits de V5.3.2.
 // Les effets sont statiques et ne capturent aucune interaction tactile.
 private struct BILUXV59AuraFrame: View {
@@ -2344,6 +2350,7 @@ private struct BILUXV59LegacyProfile: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 20) {
                     profileHeader
+                    rebirthCharacterSheet
                     SectionCaption(title: "Titres de légende")
                     Text("Équipe un titre déjà acquis dans la Salle des trophées. Aucun bonus d'XP n'est ajouté.")
                         .font(.caption).foregroundStyle(Nuclear.muted)
@@ -2397,6 +2404,47 @@ private struct BILUXV59LegacyProfile: View {
         }
     }
 
+    // REBIRTH : des statistiques calculées à partir du journal, jamais des XP bonus.
+    private var rebirthCharacterSheet: some View {
+        let progress = BILUXV55Progression.currentQuestProgress(journal.data)
+        let minutes = journal.data.workouts.reduce(0) { $0 + max(0, $1.durationMinutes) }
+        return VStack(alignment: .leading, spacing: 10) {
+            SectionCaption(title: "Rebirth · Fiche du combattant")
+            NuclearCard {
+                HStack(spacing: 8) {
+                    Image(systemName: "person.crop.circle.fill")
+                        .font(.title2).foregroundStyle(Nuclear.gold)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("HÉRITAGE DU NOYAU")
+                            .font(.caption.bold()).tracking(1).foregroundStyle(Nuclear.paleGold)
+                        Text("Ta puissance reflète les séances consignées, sans modifier tes XP.")
+                            .font(.caption2).foregroundStyle(Nuclear.muted)
+                    }
+                }
+                HStack(spacing: 8) {
+                    statPill("HEURES", "\(minutes / 60) h")
+                    statPill("EXERCICES", "\(NuclearProgress.uniqueExercises(journal.data))")
+                    statPill("SEMAINE", "\(progress.weeklyWorkouts) / 3")
+                }
+                Text("PROCHAINE TRANSFORMATION")
+                    .font(.system(size: 10, weight: .heavy)).foregroundStyle(Nuclear.gold)
+                let stage = journal.unlockedStageIndex
+                if stage >= NuclearStage.all.count - 1 {
+                    Text("ASCENSION · FORMES MAÎTRISÉES")
+                        .font(.caption.bold()).foregroundStyle(Nuclear.paleGold)
+                } else {
+                    let next = NuclearStage.all[stage + 1]
+                    Text("\(next.name) · niveau \(next.minLevel)")
+                        .font(.caption.bold()).foregroundStyle(.white)
+                    ProgressView(value: Double(journal.heroLevel), total: Double(next.minLevel))
+                        .tint(Nuclear.purple)
+                }
+                Text("Les périodes de repos n'enlèvent ni titres ni niveaux.")
+                    .font(.caption2).foregroundStyle(Nuclear.muted)
+            }
+        }
+    }
+
     private var profileHeader: some View {
         NuclearCard {
             HStack(spacing: 14) {
@@ -2407,7 +2455,7 @@ private struct BILUXV59LegacyProfile: View {
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                     .allowsHitTesting(false)
                 VStack(alignment: .leading, spacing: 8) {
-                    Text("NUCLEAR LEGACY · V5.9")
+                    Text("REBIRTH · V6.0")
                         .font(.system(size: 10, weight: .heavy)).tracking(1)
                         .foregroundStyle(Nuclear.gold)
                     Text(journal.data.heroName.uppercased())

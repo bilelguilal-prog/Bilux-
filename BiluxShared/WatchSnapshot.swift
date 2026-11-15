@@ -24,6 +24,16 @@ struct WatchSnapshot: Codable {
     var energyConsumed: Double?
     var quests: [WatchQuest]
     var updatedAt: Date
+    // V6.0 : nouveaux champs facultatifs pour lire aussi les anciens snapshots Watch 2.0.
+    // Aucun renseignement médical supplémentaire n'est synchronisé.
+    var xpRemaining: Int? = nil
+    var weeklyWorkouts: Int? = nil
+    var monthlyWorkouts: Int? = nil
+    var quarterWorkouts: Int? = nil
+    var workoutCount: Int? = nil
+    var lastWorkoutLabel: String? = nil
+    var equippedTitle: String? = nil
+    var equippedAura: String? = nil
 
     static let empty = WatchSnapshot(
         heroName: "BILUX", level: 1, rank: "SURVIVANT", totalXP: 0,

@@ -42,6 +42,9 @@ final class WatchPhoneBridge: NSObject, WCSessionDelegate {
         let didWorkout = questStatus.todayWorkout
         let didEat = questStatus.todayMeal
         let didCheckin = questStatus.todayCheckin
+        let appearance = journal.map { BILUXV60WatchAppearance($0) }
+        let latest = data.workouts.max(by: { $0.date < $1.date })
+        let lastLabel = latest.map { "\($0.activity) · \($0.durationMinutes) min" }
         snapshot = WatchSnapshot(
             heroName: data.heroName, level: level, rank: rank,
             totalXP: xp, xpProgress: BILUXV55Progression.fraction(data),
@@ -52,7 +55,15 @@ final class WatchPhoneBridge: NSObject, WCSessionDelegate {
                 WatchQuest(id: "workout", title: "Consigner une séance", completed: didWorkout, reward: 45),
                 WatchQuest(id: "nutrition", title: "Suivre l'alimentation", completed: didEat, reward: 6),
                 WatchQuest(id: "checkin", title: "Noter son ressenti", completed: didCheckin, reward: 6)
-            ], updatedAt: now
+            ], updatedAt: now,
+            xpRemaining: BILUXV55Progression.remainingXP(data),
+            weeklyWorkouts: questStatus.weeklyWorkouts,
+            monthlyWorkouts: questStatus.monthlyWorkouts,
+            quarterWorkouts: questStatus.quarterWorkouts,
+            workoutCount: data.workouts.count,
+            lastWorkoutLabel: lastLabel,
+            equippedTitle: appearance?.title,
+            equippedAura: appearance?.aura
         )
         sendSnapshot()
     }

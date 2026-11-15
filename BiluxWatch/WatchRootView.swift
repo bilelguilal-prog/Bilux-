@@ -286,7 +286,8 @@ struct WatchRootView: View {
             commandPage.tag(0)
             healthPage.tag(1)
             questPage.tag(2)
-            V54WatchWorkoutView().tag(3)
+            ascensionPage.tag(3)
+            V54WatchWorkoutView().tag(4)
         }
         .tabViewStyle(.verticalPage)
         .background {
@@ -309,7 +310,7 @@ struct WatchRootView: View {
                         .font(.system(size: 22, weight: .black, design: .rounded))
                         .foregroundStyle(.white)
                 }
-                Text("NUCLEAR WATCH 2.0")
+                Text("REBIRTH · WATCH 3.0")
                     .font(.system(size: 9, weight: .heavy))
                     .tracking(1.1)
                     .foregroundStyle(V54ReactorTheme.gold)
@@ -330,8 +331,26 @@ struct WatchRootView: View {
                             Text("\(bridge.snapshot.totalXP) XP")
                                 .font(.system(size: 12, weight: .semibold))
                                 .foregroundStyle(V54ReactorTheme.secondary)
+                            if let remaining = bridge.snapshot.xpRemaining {
+                                Text("Encore \(remaining) XP")
+                                    .font(.system(size: 9, weight: .semibold))
+                                    .foregroundStyle(V54ReactorTheme.secondary)
+                            }
                         }
                         Spacer(minLength: 0)
+                    }
+                }
+                if let title = bridge.snapshot.equippedTitle, !title.isEmpty {
+                    V54ReactorCard(accent: V54ReactorTheme.purple) {
+                        Label(title, systemImage: "crown.fill")
+                            .font(.system(size: 11, weight: .heavy))
+                            .foregroundStyle(V54ReactorTheme.paleGold)
+                            .lineLimit(2).minimumScaleFactor(0.7)
+                        if let aura = bridge.snapshot.equippedAura {
+                            Label(aura, systemImage: "sparkles")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(V54ReactorTheme.purple)
+                        }
                     }
                 }
                 if bridge.snapshot.updatedAt == .distantPast {
@@ -345,7 +364,7 @@ struct WatchRootView: View {
                         .foregroundStyle(V54ReactorTheme.secondary)
                 }
                 Button {
-                    selectedPage = 3
+                    selectedPage = 4
                 } label: {
                     Label("LANCER LA FORGE", systemImage: "dumbbell.fill")
                         .frame(maxWidth: .infinity)
@@ -353,6 +372,15 @@ struct WatchRootView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(V54ReactorTheme.gold)
+
+                Button {
+                    selectedPage = 3
+                } label: {
+                    Label("LES GARDIENS", systemImage: "shield.fill")
+                        .font(.caption2.bold())
+                }
+                .buttonStyle(.bordered)
+                .tint(V54ReactorTheme.purple)
 
                 Button {
                     bridge.refresh()
@@ -461,6 +489,87 @@ struct WatchRootView: View {
         .containerBackground(.clear, for: .tabView)
     }
 
+    // ASCENSION : données du même calcul de jours éligibles que l'iPhone.
+    private var ascensionPage: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 9) {
+                V54ReactorTitle(text: "L'ASCENSION", symbol: "crown.fill")
+                V54ReactorCard(accent: V54ReactorTheme.gold) {
+                    Text("LA FORGE HEBDOMADAIRE")
+                        .font(.system(size: 10, weight: .heavy))
+                        .foregroundStyle(V54ReactorTheme.paleGold)
+                    if let days = bridge.snapshot.weeklyWorkouts {
+                        HStack {
+                            Text("\(days) / 3 journées")
+                                .font(.system(size: 14, weight: .heavy))
+                            Spacer()
+                            Text(days >= 3 ? "ACCOMPLI" : "EN COURS")
+                                .font(.system(size: 9, weight: .heavy))
+                                .foregroundStyle(V54ReactorTheme.gold)
+                        }
+                        ProgressView(value: Double(min(3, max(0, days))), total: 3)
+                            .tint(V54ReactorTheme.gold)
+                    } else {
+                        Text("Synchronise l'iPhone pour voir tes missions.")
+                            .font(.caption2).foregroundStyle(V54ReactorTheme.secondary)
+                    }
+                }
+                guardianCard(name: "GARDIEN DU RÉACTEUR", icon: "shield.fill",
+                             done: bridge.snapshot.monthlyWorkouts, goal: 12,
+                             accent: V54ReactorTheme.purple, span: "Mensuel")
+                guardianCard(name: "SOUVERAIN DU NÉANT", icon: "crown.fill",
+                             done: bridge.snapshot.quarterWorkouts, goal: 30,
+                             accent: V54ReactorTheme.gold, span: "Trimestriel")
+                if let count = bridge.snapshot.workoutCount {
+                    V54ReactorCard {
+                        Label("\(count) séances consignées", systemImage: "dumbbell.fill")
+                            .font(.caption2.bold()).foregroundStyle(V54ReactorTheme.paleGold)
+                        if let recent = bridge.snapshot.lastWorkoutLabel {
+                            Text("Dernière : \(recent)")
+                                .font(.system(size: 10))
+                                .foregroundStyle(V54ReactorTheme.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+                Text("Les PV changent avec tes séances éligibles : 1 jour par date, au plus 5 par semaine. Aucun malus de repos.")
+                    .font(.system(size: 9))
+                    .foregroundStyle(V54ReactorTheme.secondary)
+            }
+            .padding(.horizontal, 5)
+            .padding(.bottom, 8)
+        }
+        .containerBackground(.clear, for: .tabView)
+    }
+
+    private func guardianCard(name: String, icon: String, done: Int?, goal: Int,
+                              accent: Color, span: String) -> some View {
+        V54ReactorCard(accent: accent) {
+            Label(name, systemImage: icon)
+                .font(.system(size: 11, weight: .heavy))
+                .foregroundStyle(accent)
+                .fixedSize(horizontal: false, vertical: true)
+            if let done {
+                let capped = min(goal, max(0, done))
+                let hp = max(0, Int((100.0 * Double(goal - capped) / Double(goal)).rounded()))
+                HStack {
+                    Text("\(capped) / \(goal) jours")
+                        .font(.system(size: 12, weight: .bold))
+                    Spacer()
+                    Text("\(hp)% PV")
+                        .font(.system(size: 11, weight: .heavy))
+                }
+                ProgressView(value: Double(capped), total: Double(goal)).tint(accent)
+                Text(capped >= goal ? "VICTOIRE" : "\(span) · phase \(min(4, Int(Double(capped) / Double(goal) * 4) + 1))")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(V54ReactorTheme.secondary)
+            } else {
+                Text("Données en attente de l'iPhone")
+                    .font(.caption2).foregroundStyle(V54ReactorTheme.secondary)
+            }
+        }
+    }
+
     private func whole(_ value: Double?) -> String {
         guard let value, value.isFinite else { return "—" }
         return Int(value.rounded()).formatted()
@@ -493,22 +602,35 @@ struct V54WatchWorkoutView: View {
     @EnvironmentObject private var bridge: WatchBridge
     @AppStorage("bilux.watch.workout.start") private var startTimestamp: Double = 0
     @AppStorage("bilux.watch.workout.activity") private var activity = V54CombatMode.musculation.rawValue
+    @AppStorage("bilux.watch.workout.pausedAt") private var pausedAt: Double = 0
+    @AppStorage("bilux.watch.workout.pauseSeconds") private var pauseSeconds: Double = 0
     @State private var confirmAbandon = false
     @State private var localMessage: String?
 
     private var running: Bool { startTimestamp > 0 }
+    private var paused: Bool { running && pausedAt > 0 }
+
+    private func elapsedSeconds(now: Date) -> Int {
+        let stop = paused ? pausedAt : now.timeIntervalSince1970
+        return max(0, Int(stop - startTimestamp - pauseSeconds))
+    }
+    private func resetTimer() {
+        startTimestamp = 0
+        pausedAt = 0
+        pauseSeconds = 0
+    }
 
     var body: some View {
         ScrollView {
             VStack(spacing: 9) {
-                V54ReactorTitle(text: "LA FORGE", symbol: "dumbbell.fill")
+                V54ReactorTitle(text: "LA FORGE · WATCH 3.0", symbol: "dumbbell.fill")
                 if running {
                     V54ReactorCard(accent: V54ReactorTheme.gold) {
                         Label(activity.uppercased(), systemImage: "bolt.fill")
                             .font(.system(size: 10, weight: .heavy))
                             .foregroundStyle(V54ReactorTheme.gold)
                         TimelineView(.periodic(from: .now, by: 1)) { context in
-                            let seconds = max(0, Int(context.date.timeIntervalSince1970 - startTimestamp))
+                            let seconds = elapsedSeconds(now: context.date)
                             Text(String(format: "%02d:%02d:%02d", seconds / 3600, (seconds / 60) % 60, seconds % 60))
                                 .font(.system(size: 23, weight: .black, design: .rounded))
                                 .monospacedDigit()
@@ -518,13 +640,27 @@ struct V54WatchWorkoutView: View {
                         }
                     }
                     Button {
+                        if paused {
+                            pauseSeconds += max(0, Date().timeIntervalSince1970 - pausedAt)
+                            pausedAt = 0
+                        } else {
+                            pausedAt = Date().timeIntervalSince1970
+                        }
+                    } label: {
+                        Label(paused ? "REPRENDRE" : "PAUSE", systemImage: paused ? "play.fill" : "pause.fill")
+                            .font(.system(size: 11, weight: .heavy))
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(V54ReactorTheme.purple)
+
+                    Button {
                         let start = Date(timeIntervalSince1970: startTimestamp)
-                        let minutes = Int(Date().timeIntervalSince(start) / 60)
+                        let minutes = elapsedSeconds(now: .now) / 60
                         if minutes < 1 {
                             localMessage = "Attends au moins une minute avant d'enregistrer."
                         } else {
                             bridge.finishWorkout(start: start, elapsedMinutes: minutes, activity: activity)
-                            startTimestamp = 0
+                            resetTimer()
                             localMessage = "Séance transférée ou mise en attente."
                         }
                     } label: {
@@ -539,7 +675,7 @@ struct V54WatchWorkoutView: View {
                     }
                     .confirmationDialog("Abandonner cette séance sans l'enregistrer ?", isPresented: $confirmAbandon) {
                         Button("Abandonner la séance", role: .destructive) {
-                            startTimestamp = 0
+                            resetTimer()
                             localMessage = nil
                         }
                     }
@@ -568,6 +704,8 @@ struct V54WatchWorkoutView: View {
                         .tint(activity == mode.rawValue ? V54ReactorTheme.gold : V54ReactorTheme.purple)
                     }
                     Button {
+                        pauseSeconds = 0
+                        pausedAt = 0
                         startTimestamp = Date().timeIntervalSince1970
                         localMessage = nil
                     } label: {
