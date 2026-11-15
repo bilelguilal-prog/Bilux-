@@ -2241,6 +2241,7 @@ private struct BILUXV59Reward: Identifiable {
     let unlocked: Bool
 }
 
+@MainActor
 private enum BILUXV59Legacy {
     static func titles(_ journal: BiluxStore) -> [BILUXV59Reward] {
         let entries = BILUXV58Archive.achievements(journal.data, level: journal.heroLevel)
