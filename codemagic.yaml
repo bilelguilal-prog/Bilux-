@@ -62,6 +62,8 @@ workflows:
       # Codemagic récupérer un profil de distribution pour chaque cible.
       - name: Appliquer les profils Apple (iPhone et Watch)
         script: xcode-project use-profiles --project BiluxIOS.xcodeproj --archive-method=app-store --code-signing-setup-verbose-logging
+      - name: Associer le profil Apple du widget
+        script: python3 scripts/assign_widget_signing.py
       - name: Construire la version TestFlight
         script: |
           xcode-project build-ipa \
