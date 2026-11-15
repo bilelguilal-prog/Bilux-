@@ -21,14 +21,18 @@
 	<key>CFBundleVersion</key>
 	<string>19</string>
 	<key>NSHealthShareUsageDescription</key>
-	<string>Avec votre autorisation, BILUX Watch lit vos pas, calories actives et la dernière fréquence cardiaque pour le suivi sportif personnel.</string>
+	<string>Avec votre autorisation, BILUX Watch lit le pouls et les calories actives pendant les entraînements Nuclear Live et pour votre suivi sportif.</string>
 	<key>NSHealthUpdateUsageDescription</key>
-	<string>BILUX Watch ne modifie pas les données d’Apple Santé dans cette version.</string>
+	<string>Avec votre autorisation, Nuclear Live enregistre une séance dans Apple Santé uniquement lorsque vous la terminez sur la montre.</string>
 	<key>WKApplication</key>
 	<true/>
 	<key>WKCompanionAppBundleIdentifier</key>
 	<string>com.bilux.nuclearascension</string>
 	<key>WKRunsIndependentlyOfCompanionApp</key>
 	<false/>
+	<key>WKBackgroundModes</key>
+	<array>
+		<string>workout-processing</string>
+	</array>
 </dict>
 </plist>

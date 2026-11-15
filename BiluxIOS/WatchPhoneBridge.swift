@@ -92,10 +92,21 @@ final class WatchPhoneBridge: NSObject, WCSessionDelegate {
         let allowedActivities: Set<String> = ["Musculation", "Marche", "Cardio", "Mobilité"]
         let requestedActivity = message["activity"] as? String
         let activity = requestedActivity.flatMap { allowedActivities.contains($0) ? $0 : nil } ?? "Séance Apple Watch"
+        // V6.1 : une vraie séance Santé, identifiée par son UUID d'origine,
+        // peut figurer dans La Forge sans être recréée dans Apple Santé.
+        let isLive = (message["source"] as? String) == "healthkit"
+        let note: String
+        if isLive {
+            let calories = (message["activeKcal"] as? Double).flatMap { $0.isFinite ? max(0, $0) : nil }
+            let energyText = calories.map { " · \(Int($0.rounded())) kcal actives" } ?? ""
+            note = "Nuclear Live : séance déjà sauvegardée dans Apple Santé\(energyText)."
+        } else {
+            note = "Chronométrée dans BILUX Watch (sans enregistrement HealthKit)"
+        }
         journal.add(WorkoutSession(
             id: id, date: Date(timeIntervalSince1970: startedAt),
             activity: activity, durationMinutes: duration,
-            notes: "Chronométrée dans BILUX Watch (sans enregistrement HealthKit)", exercises: []
+            notes: note, exercises: []
         ))
     }
 

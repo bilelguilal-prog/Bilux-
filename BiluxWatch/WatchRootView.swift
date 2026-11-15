@@ -288,6 +288,7 @@ struct WatchRootView: View {
             questPage.tag(2)
             ascensionPage.tag(3)
             V54WatchWorkoutView().tag(4)
+            V61LiveWorkoutView().tag(5)
         }
         .tabViewStyle(.verticalPage)
         .background {
@@ -372,6 +373,16 @@ struct WatchRootView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(V54ReactorTheme.gold)
+
+                Button {
+                    selectedPage = 5
+                } label: {
+                    Label("NUCLEAR LIVE", systemImage: "heart.fill")
+                        .font(.caption2.bold())
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(V54ReactorTheme.purple)
 
                 Button {
                     selectedPage = 3
@@ -725,6 +736,365 @@ struct V54WatchWorkoutView: View {
                     .font(.system(size: 9))
                     .multilineTextAlignment(.center)
                     .foregroundStyle(V54ReactorTheme.secondary)
+            }
+            .padding(.horizontal, 5)
+            .padding(.bottom, 8)
+        }
+        .containerBackground(.clear, for: .tabView)
+    }
+}
+
+// MARK: - BILUX V6.1 · NUCLEAR LIVE
+// Une vraie séance HealthKit distincte de la Forge manuelle.
+// La session reste gérée par un singleton même si l'utilisateur change de page.
+import HealthKit
+import Combine
+
+private enum V61LiveMode: String, CaseIterable, Identifiable {
+    case strength = "Musculation"
+    case walking = "Marche"
+    case cardio = "Cardio"
+    case mobility = "Mobilité"
+
+    var id: String { rawValue }
+    var symbol: String {
+        switch self {
+        case .strength: return "dumbbell.fill"
+        case .walking: return "figure.walk"
+        case .cardio: return "heart.fill"
+        case .mobility: return "figure.cooldown"
+        }
+    }
+    var healthType: HKWorkoutActivityType {
+        switch self {
+        case .strength: return .traditionalStrengthTraining
+        case .walking: return .walking
+        case .cardio: return .mixedCardio
+        case .mobility: return .flexibility
+        }
+    }
+}
+
+@MainActor
+private final class V61NuclearLive: NSObject, ObservableObject, HKWorkoutSessionDelegate, HKLiveWorkoutBuilderDelegate {
+    static let shared = V61NuclearLive()
+
+    enum Phase: Equatable {
+        case idle, requesting, starting, running, paused, finishing, saved, failed
+    }
+
+    @Published private(set) var phase: Phase = .idle
+    @Published private(set) var bpm: Double?
+    @Published private(set) var activeKcal: Double?
+    @Published private(set) var activityName = "Musculation"
+    @Published private(set) var message: String?
+
+    private let store = HKHealthStore()
+    private var session: HKWorkoutSession?
+    private var builder: HKLiveWorkoutBuilder?
+    private weak var bridge: WatchBridge?
+    private var begunAt: Date?
+    private var pausedAt: Date?
+    private var pausedTotal: TimeInterval = 0
+    private var finishDuration: Int = 0
+    private var didFinish = false
+    private var closingCollection = false
+
+    var inProgress: Bool { phase == .requesting || phase == .starting || phase == .running || phase == .paused || phase == .finishing }
+
+    func elapsed(at date: Date = .now) -> Int {
+        guard let begunAt else { return 0 }
+        let end = pausedAt ?? date
+        return max(0, Int(end.timeIntervalSince(begunAt) - pausedTotal))
+    }
+
+    func start(mode: V61LiveMode, bridge: WatchBridge) async {
+        guard !inProgress else { return }
+        guard HKHealthStore.isHealthDataAvailable() else {
+            phase = .failed
+            message = "Apple Santé est indisponible sur cette montre."
+            return
+        }
+        self.bridge = bridge
+        phase = .requesting
+        message = "Autorisation Apple Santé…"
+        do {
+            let read: Set<HKObjectType> = [
+                HKObjectType.quantityType(forIdentifier: .heartRate)!,
+                HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!
+            ]
+            let share: Set<HKSampleType> = [HKObjectType.workoutType()]
+            try await store.requestAuthorization(toShare: share, read: read)
+            // La demande d'autorisation ne garantit pas l'accès ; les mesures peuvent rester absentes.
+            let config = HKWorkoutConfiguration()
+            config.activityType = mode.healthType
+            config.locationType = .unknown
+            let activeSession = try HKWorkoutSession(healthStore: store, configuration: config)
+            let activeBuilder = activeSession.associatedWorkoutBuilder()
+            activeBuilder.dataSource = HKLiveWorkoutDataSource(healthStore: store, workoutConfiguration: config)
+            activeSession.delegate = self
+            activeBuilder.delegate = self
+            session = activeSession
+            builder = activeBuilder
+            activityName = mode.rawValue
+            bpm = nil
+            activeKcal = nil
+            pausedAt = nil
+            pausedTotal = 0
+            didFinish = false
+            closingCollection = false
+            let now = Date()
+            begunAt = now
+            phase = .starting
+            message = "Activation des capteurs…"
+            activeSession.startActivity(with: now)
+            activeBuilder.beginCollection(withStart: now) { [weak self] success, error in
+                Task { @MainActor in
+                    guard let self, self.phase == .starting else { return }
+                    if success {
+                        self.phase = .running
+                        self.message = nil
+                    } else {
+                        self.fail(error?.localizedDescription ?? "Impossible de démarrer la collecte Santé.")
+                    }
+                }
+            }
+        } catch {
+            fail("Démarrage refusé : \(error.localizedDescription)")
+        }
+    }
+
+    func pauseOrResume() {
+        switch phase {
+        case .running:
+            pausedAt = Date()
+            session?.pause()
+            phase = .paused
+        case .paused:
+            if let pausedAt { pausedTotal += max(0, Date().timeIntervalSince(pausedAt)) }
+            pausedAt = nil
+            session?.resume()
+            phase = .running
+        default: break
+        }
+    }
+
+    func finish() {
+        guard phase == .running || phase == .paused, !didFinish else { return }
+        let seconds = elapsed()
+        guard seconds >= 60 else {
+            message = "Une minute effective minimum pour consigner dans BILUX. Tu peux aussi annuler."
+            return
+        }
+        guard session != nil, builder != nil else { return }
+        didFinish = true
+        finishDuration = seconds
+        phase = .finishing
+        message = "Enregistrement dans Apple Santé…"
+        // Selon Apple : arrêt de l'activité -> état .stopped -> fin de collecte -> sauvegarde.
+        session?.stopActivity(with: Date())
+    }
+
+    private func finishStoppedSession(at end: Date) {
+        guard phase == .finishing, !closingCollection, let builder else { return }
+        closingCollection = true
+        builder.endCollection(withEnd: end) { [weak self] success, error in
+            guard let self else { return }
+            guard success else {
+                Task { @MainActor in self.fail("Enregistrement incomplet : \(error?.localizedDescription ?? "collecte interrompue")") }
+                return
+            }
+            builder.finishWorkout { [weak self] workout, error in
+                Task { @MainActor in
+                    guard let self else { return }
+                    guard let workout else {
+                        self.fail("Sauvegarde Santé impossible : \(error?.localizedDescription ?? "erreur inconnue")")
+                        return
+                    }
+                    // L'UUID HealthKit identifie aussi l'entrée BILUX : la WatchConnectivity
+                    // peut retransmettre sans créer un second entraînement dans le journal.
+                    self.session?.end()
+                    let minutes = self.finishDuration / 60
+                    self.bridge?.finishLiveWorkout(
+                        start: workout.startDate, elapsedMinutes: minutes,
+                        activity: self.activityName, workoutID: workout.uuid,
+                        activeKcal: self.activeKcal
+                    )
+                    self.clearReferences()
+                    self.phase = .saved
+                    self.message = "Séance dans Apple Santé ✓ · Transfert BILUX lancé."
+                }
+            }
+        }
+    }
+
+    func cancel() {
+        guard inProgress, phase != .finishing else { return }
+        session?.end()
+        builder?.discardWorkout()
+        clearReferences()
+        phase = .idle
+        message = "Séance annulée : rien envoyé au journal BILUX."
+    }
+
+    private func clearReferences() {
+        session?.delegate = nil
+        builder?.delegate = nil
+        session = nil
+        builder = nil
+        begunAt = nil
+        pausedAt = nil
+        pausedTotal = 0
+        didFinish = false
+        closingCollection = false
+        finishDuration = 0
+    }
+
+    private func fail(_ text: String) {
+        session?.end()
+        // L'erreur n'autorise jamais une seconde sauvegarde implicite.
+        builder?.discardWorkout()
+        clearReferences()
+        phase = .failed
+        message = text
+    }
+
+    private func updateMetrics() {
+        guard let builder else { return }
+        if let heartType = HKObjectType.quantityType(forIdentifier: .heartRate),
+           let quantity = builder.statistics(for: heartType)?.mostRecentQuantity() {
+            let rate = quantity.doubleValue(for: HKUnit.count().unitDivided(by: .minute()))
+            if rate.isFinite && rate > 0 { bpm = rate }
+        }
+        if let energyType = HKObjectType.quantityType(forIdentifier: .activeEnergyBurned),
+           let quantity = builder.statistics(for: energyType)?.sumQuantity() {
+            let energy = quantity.doubleValue(for: .kilocalorie())
+            if energy.isFinite && energy >= 0 { activeKcal = energy }
+        }
+    }
+
+    nonisolated func workoutSession(_ workoutSession: HKWorkoutSession,
+                                    didChangeTo toState: HKWorkoutSessionState,
+                                    from fromState: HKWorkoutSessionState, date: Date) {
+        if toState == .stopped {
+            Task { @MainActor in self.finishStoppedSession(at: date) }
+        }
+    }
+    nonisolated func workoutSession(_ workoutSession: HKWorkoutSession, didFailWithError error: Error) {
+        Task { @MainActor in
+            if self.phase != .finishing && self.inProgress { self.fail("Séance interrompue : \(error.localizedDescription)") }
+        }
+    }
+    nonisolated func workoutBuilder(_ workoutBuilder: HKLiveWorkoutBuilder,
+                                     didCollectDataOf collectedTypes: Set<HKSampleType>) {
+        Task { @MainActor in self.updateMetrics() }
+    }
+    nonisolated func workoutBuilderDidCollectEvent(_ workoutBuilder: HKLiveWorkoutBuilder) {}
+}
+
+@MainActor
+private struct V61LiveWorkoutView: View {
+    @EnvironmentObject private var bridge: WatchBridge
+    @StateObject private var live = V61NuclearLive.shared
+    @State private var selectedMode: V61LiveMode = .strength
+    @State private var confirmCancel = false
+
+    private func clock(_ seconds: Int) -> String {
+        String(format: "%02d:%02d:%02d", seconds / 3600, (seconds / 60) % 60, seconds % 60)
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 9) {
+                V54ReactorTitle(text: "NUCLEAR LIVE · V6.1", symbol: "heart.fill")
+                if !live.inProgress {
+                    V54ReactorCard(accent: V54ReactorTheme.purple) {
+                        Label("CAPTEURS EN DIRECT", systemImage: "waveform.path.ecg")
+                            .font(.system(size: 11, weight: .heavy))
+                            .foregroundStyle(V54ReactorTheme.paleGold)
+                        Text("La Watch mesure le pouls et les calories. La séance sera aussi enregistrée dans Apple Santé.")
+                            .font(.system(size: 10)).foregroundStyle(V54ReactorTheme.secondary)
+                    }
+                    ForEach(V61LiveMode.allCases) { mode in
+                        Button { selectedMode = mode } label: {
+                            HStack {
+                                Label(mode.rawValue, systemImage: mode.symbol)
+                                Spacer(minLength: 2)
+                                if selectedMode == mode { Image(systemName: "checkmark.circle.fill") }
+                            }
+                            .font(.system(size: 12, weight: .semibold))
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(selectedMode == mode ? V54ReactorTheme.gold : V54ReactorTheme.purple)
+                    }
+                    Button {
+                        Task { await live.start(mode: selectedMode, bridge: bridge) }
+                    } label: {
+                        Label("DÉMARRER LIVE", systemImage: "play.fill")
+                            .font(.system(size: 12, weight: .heavy))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(V54ReactorTheme.gold)
+                } else {
+                    V54ReactorCard(accent: V54ReactorTheme.gold) {
+                        Text(live.activityName.uppercased())
+                            .font(.system(size: 10, weight: .heavy)).foregroundStyle(V54ReactorTheme.gold)
+                        TimelineView(.periodic(from: .now, by: 1)) { context in
+                            Text(clock(live.elapsed(at: context.date)))
+                                .font(.system(size: 23, weight: .black, design: .rounded))
+                                .monospacedDigit().minimumScaleFactor(0.7).lineLimit(1)
+                                .frame(maxWidth: .infinity)
+                        }
+                        HStack(spacing: 10) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Label("BPM", systemImage: "heart.fill")
+                                    .font(.system(size: 10)).foregroundStyle(V54ReactorTheme.purple)
+                                Text(live.bpm.map { String(Int($0.rounded())) } ?? "—")
+                                    .font(.title3.bold()).monospacedDigit()
+                            }
+                            Spacer()
+                            VStack(alignment: .leading, spacing: 2) {
+                                Label("KCAL", systemImage: "flame.fill")
+                                    .font(.system(size: 10)).foregroundStyle(V54ReactorTheme.gold)
+                                Text(live.activeKcal.map { String(Int($0.rounded())) } ?? "—")
+                                    .font(.title3.bold()).monospacedDigit()
+                            }
+                        }
+                    }
+                    if live.phase == .paused {
+                        Label("SÉANCE EN PAUSE", systemImage: "pause.circle.fill")
+                            .font(.caption2.bold()).foregroundStyle(V54ReactorTheme.purple)
+                    }
+                    if live.phase == .running || live.phase == .paused {
+                        Button { live.pauseOrResume() } label: {
+                            Label(live.phase == .paused ? "REPRENDRE" : "PAUSE",
+                                  systemImage: live.phase == .paused ? "play.fill" : "pause.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered).tint(V54ReactorTheme.purple)
+                        Button { live.finish() } label: {
+                            Label("TERMINER ET SAUVER", systemImage: "checkmark.circle.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent).tint(V54ReactorTheme.gold)
+                        Button(role: .destructive) { confirmCancel = true } label: {
+                            Label("Annuler sans sauvegarder", systemImage: "xmark.circle")
+                                .font(.system(size: 10))
+                        }
+                        .confirmationDialog("Annuler la séance HealthKit sans l'enregistrer ?", isPresented: $confirmCancel) {
+                            Button("Annuler la séance", role: .destructive) { live.cancel() }
+                        }
+                    }
+                }
+                if let message = live.message {
+                    Text(message).font(.system(size: 10))
+                        .foregroundStyle(V54ReactorTheme.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Text("Une séance HealthKit terminée = un enregistrement dans Apple Santé et une entrée dans BILUX. La Forge manuelle reste disponible séparément.")
+                    .font(.system(size: 9)).foregroundStyle(V54ReactorTheme.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 5)
             .padding(.bottom, 8)

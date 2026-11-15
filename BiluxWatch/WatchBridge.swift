@@ -55,6 +55,33 @@ final class WatchBridge: NSObject, ObservableObject, WCSessionDelegate {
         feedback = "Séance enregistrée sur la montre. Transfert vers l'iPhone en attente ou en cours."
     }
 
+    // V6.1 : envoi idempotent après sauvegarde effective de HKWorkout.
+    // UUID Apple Santé = UUID du journal BILUX ; WCSession peut rejouer le transfert.
+    func finishLiveWorkout(start: Date, elapsedMinutes: Int, activity: String,
+                           workoutID: UUID, activeKcal: Double?) {
+        guard (1...240).contains(elapsedMinutes),
+              WCSession.isSupported() else {
+            feedback = "Séance Santé sauvegardée, mais transfert BILUX indisponible."
+            return
+        }
+        var event: [String: Any] = [
+            "type": "workoutCompleted", "id": workoutID.uuidString,
+            "startedAt": start.timeIntervalSince1970,
+            "durationMinutes": elapsedMinutes, "activity": activity,
+            "source": "healthkit"
+        ]
+        if let activeKcal, activeKcal.isFinite {
+            event["activeKcal"] = max(0, activeKcal)
+        }
+        var queued = UserDefaults.standard.array(forKey: pendingKey) as? [[String: Any]] ?? []
+        if !queued.contains(where: { ($0["id"] as? String) == workoutID.uuidString }) {
+            queued.append(event)
+            UserDefaults.standard.set(queued, forKey: pendingKey)
+        }
+        flushWorkouts()
+        feedback = "Nuclear Live sauvegardé. Transfert vers BILUX en cours."
+    }
+
     private func flushWorkouts() {
         guard WCSession.isSupported(), WCSession.default.activationState == .activated else { return }
         let pending = UserDefaults.standard.array(forKey: pendingKey) as? [[String: Any]] ?? []
