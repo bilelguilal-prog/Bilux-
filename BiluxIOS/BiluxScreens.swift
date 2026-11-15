@@ -1042,6 +1042,7 @@ struct HealthScreen: View {
 struct AscensionScreen: View {
     @EnvironmentObject private var journal: BiluxStore
     @State private var showingImporter = false
+    @State private var showCodex = false
     @State private var exportFile: URL?
     @AppStorage("bilux.effectsEnabled") private var effectsEnabled = true
     @AppStorage("bilux.equippedTransformationID") private var equippedTransformationID = -1
@@ -1086,6 +1087,24 @@ struct AscensionScreen: View {
                             .font(.caption).foregroundStyle(Nuclear.muted)
                     }
                     LongAscensionQuestBoard()
+                    SectionCaption(title: "Le Nuclear Codex")
+                    NuclearCard {
+                        HStack(alignment: .center, spacing: 13) {
+                            Image(systemName: "books.vertical.fill")
+                                .font(.system(size: 33)).foregroundStyle(Nuclear.gold)
+                            VStack(alignment: .leading, spacing: 5) {
+                                Text("THE NUCLEAR CODEX")
+                                    .font(.headline.bold()).foregroundStyle(Nuclear.paleGold)
+                                Text("Bestiaire · Trophées · Chroniques · Formes · Secrets")
+                                    .font(.caption).foregroundStyle(Nuclear.muted)
+                            }
+                        }
+                        Button { showCodex = true } label: {
+                            Label("OUVRIR LE GRIMOIRE", systemImage: "book.closed.fill")
+                                .font(.headline.bold()).frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderedProminent).tint(Nuclear.gold)
+                    }
                     SectionCaption(title: "Les cinq transformations")
                     Text("Chaque rang a désormais un portrait différent. Une forme déverrouillée peut être équipée ; les rangs futurs restent en aperçu.")
                         .font(.caption).foregroundStyle(Nuclear.muted)
@@ -1200,6 +1219,9 @@ struct AscensionScreen: View {
             .onAppear {
                 let unlocked = NuclearStage.all.first(where: { $0.id == equippedTransformationID && $0.id <= journal.unlockedStageIndex })
                 selectedStage = (unlocked ?? NuclearStage.all[journal.unlockedStageIndex]).id
+            }
+            .sheet(isPresented: $showCodex) {
+                BILUXV58Codex().environmentObject(journal)
             }
             .fullScreenCover(item: $cinematicStage) { stage in
                 BILUXV57RankCinema(stage: stage, effectsEnabled: effectsEnabled) {
@@ -1446,7 +1468,7 @@ private struct BILUXV56BossBattle: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 18) {
-                Text("DOSSIER DE COMBAT · BILUX V5.6")
+                Text("DOSSIER DE COMBAT · ARÈNE DES GARDIENS")
                     .font(.system(size: 10, weight: .black, design: .rounded))
                     .tracking(2).foregroundStyle(Nuclear.paleGold)
                     .padding(.top, 8)
@@ -1724,5 +1746,384 @@ private struct BILUXV57VictoryCinema: View {
             }
         }
         .accessibilityLabel("Victoire sur \(boss.title), \(boss.reward) XP déjà attribués")
+    }
+}
+
+// MARK: - BILUX V5.8 · THE NUCLEAR CODEX
+// Archives de lecture : aucune modification du journal, des XP ou de HealthKit.
+private enum BILUXV58CodexTab: String, CaseIterable, Identifiable {
+    case bestiary = "Bestiaire"
+    case trophies = "Trophées"
+    case chronicles = "Chroniques"
+    case gallery = "Formes"
+    case secrets = "Secrets"
+
+    var id: String { rawValue }
+    var icon: String {
+        switch self {
+        case .bestiary: return "shield.lefthalf.filled"
+        case .trophies: return "trophy.fill"
+        case .chronicles: return "book.closed.fill"
+        case .gallery: return "sparkles.rectangle.stack"
+        case .secrets: return "lock.open.fill"
+        }
+    }
+}
+
+// Même fenêtre V5.5, même plafond de cinq jours par semaine que le moteur d'XP.
+// Sert uniquement à afficher les victoires historiques, jamais à attribuer des XP.
+private enum BILUXV58Archive {
+    static func eligibleDays(_ data: BiluxData, now: Date = .now) -> [Date] {
+        guard let anchor = data.longAscensionAnchor else { return [] }
+        let calendar = Calendar.current
+        let dates = Set(data.workouts.filter {
+            $0.durationMinutes >= 10 && $0.date >= anchor.startedAt && $0.date <= now
+        }.map { calendar.startOfDay(for: $0.date) })
+        let byWeek = Dictionary(grouping: dates) { day in
+            calendar.dateInterval(of: .weekOfYear, for: day)?.start ?? calendar.startOfDay(for: day)
+        }
+        return byWeek.values.flatMap { Array($0.sorted().prefix(5)) }.sorted()
+    }
+
+    static func victories(_ data: BiluxData, against boss: BILUXV56Boss, now: Date = .now) -> Int {
+        let calendar = Calendar.current
+        let grouped = Dictionary(grouping: eligibleDays(data, now: now)) { day -> Date in
+            if boss == .guardian {
+                return calendar.dateInterval(of: .month, for: day)?.start ?? day
+            }
+            let components = calendar.dateComponents([.year, .month], from: day)
+            let firstMonth = (((components.month ?? 1) - 1) / 3) * 3 + 1
+            return calendar.date(from: DateComponents(year: components.year, month: firstMonth, day: 1)) ?? day
+        }
+        return grouped.values.filter { $0.count >= boss.target }.count
+    }
+
+    static func achievements(_ data: BiluxData, level: Int) -> [NuclearAward] {
+        let oldAwards = NuclearProgress.awards(data, level: level)
+        let guardianWins = victories(data, against: .guardian)
+        let sovereignWins = victories(data, against: .sovereign)
+        let newAwards: [NuclearAward] = [
+            .init(id: "v58-25", name: "VÉTÉRAN DU NOYAU", detail: "25 séances enregistrées", icon: "medal.fill", achieved: data.workouts.count >= 25),
+            .init(id: "v58-50", name: "CENTURION", detail: "50 séances enregistrées", icon: "shield.fill", achieved: data.workouts.count >= 50),
+            .init(id: "v58-100", name: "CHRONIQUE VIVANTE", detail: "100 séances enregistrées", icon: "book.pages.fill", achieved: data.workouts.count >= 100),
+            .init(id: "v58-guardian", name: "BRISEUR DE NOYAU", detail: "Vaincre le Gardien une fois depuis V5.5", icon: "bolt.shield.fill", achieved: guardianWins >= 1),
+            .init(id: "v58-sovereign", name: "CONQUÉRANT DU NÉANT", detail: "Vaincre le Souverain une fois depuis V5.5", icon: "crown.fill", achieved: sovereignWins >= 1),
+            .init(id: "v58-ultimate", name: "MAÎTRISE ULTIME", detail: "Atteindre le niveau 100", icon: "star.circle.fill", achieved: level >= 100)
+        ]
+        return oldAwards + newAwards
+    }
+}
+
+private struct BILUXV58Codex: View {
+    @EnvironmentObject private var journal: BiluxStore
+    @Environment(\.dismiss) private var dismiss
+    @AppStorage("bilux.effectsEnabled") private var effectsEnabled = true
+    @State private var activeTab: BILUXV58CodexTab = .bestiary
+    @State private var selectedBoss: BILUXV56Boss?
+    @State private var cinematicStage: NuclearStage?
+
+    private var achievements: [NuclearAward] {
+        BILUXV58Archive.achievements(journal.data, level: journal.heroLevel)
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    header
+                    tabs
+                    switch activeTab {
+                    case .bestiary: bestiary
+                    case .trophies: trophies
+                    case .chronicles: chronicles
+                    case .gallery: gallery
+                    case .secrets: secrets
+                    }
+                    Text("Archives calculées depuis ton journal local. Le Codex ne donne pas d'XP et n'impose aucune série de jours consécutifs.")
+                        .font(.caption2)
+                        .foregroundStyle(Nuclear.muted)
+                        .padding(.bottom, 18)
+                }
+                .padding(17)
+            }
+            .modifier(PageBackground())
+            .navigationTitle("Codex")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Fermer") { dismiss() }
+                        .foregroundStyle(Nuclear.gold)
+                }
+            }
+        }
+        .sheet(item: $selectedBoss) { boss in
+            NavigationStack {
+                BILUXV56BossBattle(boss: boss)
+                    .environmentObject(journal)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("Fermer") { selectedBoss = nil }
+                        }
+                    }
+            }
+            .presentationDragIndicator(.visible)
+        }
+        .fullScreenCover(item: $cinematicStage) { stage in
+            BILUXV57RankCinema(stage: stage, effectsEnabled: effectsEnabled) {
+                cinematicStage = nil
+            }
+        }
+    }
+
+    private var header: some View {
+        NuclearCard {
+            HStack(alignment: .top, spacing: 14) {
+                Image(systemName: "books.vertical.fill")
+                    .font(.system(size: 37))
+                    .foregroundStyle(Nuclear.gold)
+                    .shadow(color: Nuclear.gold.opacity(0.5), radius: 12)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("THE NUCLEAR CODEX")
+                        .font(.system(size: 15, weight: .black, design: .rounded))
+                        .tracking(1.5).foregroundStyle(Nuclear.paleGold)
+                    Text("Les archives de ton ascension")
+                        .font(.subheadline).foregroundStyle(.white)
+                    Text("Ton histoire grandit avec tes actions réelles.")
+                        .font(.caption).foregroundStyle(Nuclear.muted)
+                }
+            }
+            HStack(spacing: 12) {
+                codexCounter("TROPHÉES", "\(achievements.filter(\.achieved).count)/\(achievements.count)", "trophy.fill")
+                codexCounter("SÉANCES", "\(journal.data.workouts.count)", "dumbbell.fill")
+                codexCounter("VICTOIRES", "\(BILUXV58Archive.victories(journal.data, against: .guardian) + BILUXV58Archive.victories(journal.data, against: .sovereign))", "shield.fill")
+            }
+        }
+    }
+
+    private func codexCounter(_ label: String, _ value: String, _ icon: String) -> some View {
+        VStack(spacing: 5) {
+            Image(systemName: icon).foregroundStyle(Nuclear.gold).font(.caption)
+            Text(value).font(.headline.monospacedDigit()).foregroundStyle(.white)
+            Text(label).font(.system(size: 8, weight: .heavy)).foregroundStyle(Nuclear.muted)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .background(Nuclear.background.opacity(0.48), in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var tabs: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(BILUXV58CodexTab.allCases) { tab in
+                    Button { activeTab = tab } label: {
+                        Label(tab.rawValue, systemImage: tab.icon)
+                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                            .padding(.horizontal, 13)
+                            .padding(.vertical, 10)
+                            .foregroundStyle(activeTab == tab ? Nuclear.background : Nuclear.paleGold)
+                            .background(activeTab == tab ? Nuclear.gold : Nuclear.panel, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityAddTraits(activeTab == tab ? .isSelected : [])
+                }
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    private var bestiary: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            SectionCaption(title: "Bestiaire nucléaire")
+            Text("Deux gardiens, des archives permanentes et des batailles calculées depuis les séances éligibles.")
+                .font(.caption).foregroundStyle(Nuclear.muted)
+            ForEach(BILUXV56Boss.allCases) { boss in
+                let count = boss.countedDays(in: journal.data)
+                let wins = BILUXV58Archive.victories(journal.data, against: boss)
+                NuclearCard {
+                    GeometryReader { geometry in
+                        Image(boss.artwork)
+                            .resizable().scaledToFill()
+                            .frame(width: geometry.size.width, height: geometry.size.height)
+                            .clipped()
+                            .accessibilityHidden(true)
+                    }
+                    .frame(height: 188)
+                    .clipShape(RoundedRectangle(cornerRadius: 13))
+                    Text(boss.subtitle.uppercased())
+                        .font(.system(size: 10, weight: .heavy)).tracking(1.3)
+                        .foregroundStyle(boss.accent)
+                    Text(boss.title).font(.headline.bold()).foregroundStyle(.white)
+                    Text(boss.legend).font(.caption).foregroundStyle(Nuclear.muted)
+                    ProgressView(value: Double(min(count, boss.target)), total: Double(boss.target))
+                        .tint(boss.accent)
+                    HStack {
+                        Text("\(min(count, boss.target))/\(boss.target) jours · \(boss.phase(for: count))")
+                        Spacer(minLength: 0)
+                        Text("\(wins) victoire\(wins > 1 ? "s" : "")")
+                    }
+                    .font(.caption2.monospacedDigit()).foregroundStyle(Nuclear.paleGold)
+                    Button {
+                        selectedBoss = boss
+                    } label: {
+                        Label("VOIR LE DOSSIER DE COMBAT", systemImage: "shield.lefthalf.filled")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent).tint(boss.accent)
+                }
+            }
+            Text("Victoires recensées uniquement depuis l'activation de la progression V5.5 ; les victoires antérieures ne sont pas reconstituées.")
+                .font(.caption2).foregroundStyle(Nuclear.muted)
+        }
+    }
+
+    private var trophies: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            SectionCaption(title: "Salle des trophées")
+            Text("\(achievements.filter(\.achieved).count) exploits débloqués sur \(achievements.count). Les badges sont calculés depuis ton historique, sans récompense XP additionnelle.")
+                .font(.caption).foregroundStyle(Nuclear.muted)
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 11) {
+                ForEach(achievements) { achievement in
+                    NuclearCard {
+                        Image(systemName: achievement.achieved ? achievement.icon : "lock.fill")
+                            .font(.system(size: 25, weight: .bold))
+                            .foregroundStyle(achievement.achieved ? Nuclear.gold : Nuclear.muted)
+                        Text(achievement.name)
+                            .font(.system(size: 12, weight: .black, design: .rounded))
+                            .foregroundStyle(.white).fixedSize(horizontal: false, vertical: true)
+                        Text(achievement.detail)
+                            .font(.caption2).foregroundStyle(Nuclear.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(achievement.achieved ? "ACQUIS" : "VERROUILLÉ")
+                            .font(.system(size: 9, weight: .heavy))
+                            .foregroundStyle(achievement.achieved ? Nuclear.paleGold : Nuclear.muted)
+                    }
+                    .opacity(achievement.achieved ? 1 : 0.65)
+                }
+            }
+        }
+    }
+
+    private var chronicles: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            SectionCaption(title: "Chroniques du survivant")
+            Text("Les vingt dernières séances sont retranscrites comme autant de chapitres. Aucun renseignement médical n'est affiché ici.")
+                .font(.caption).foregroundStyle(Nuclear.muted)
+            let sessions = Array(journal.data.workouts.sorted { $0.date > $1.date }.prefix(20))
+            if sessions.isEmpty {
+                NuclearCard {
+                    Label("LE PREMIER CHAPITRE T'ATTEND", systemImage: "book.closed")
+                        .font(.headline).foregroundStyle(Nuclear.paleGold)
+                    Text("Enregistre une séance dans La Forge : elle apparaîtra ici, sans saisie supplémentaire.")
+                        .font(.subheadline).foregroundStyle(Nuclear.muted)
+                }
+            } else {
+                ForEach(sessions) { session in
+                    NuclearCard {
+                        HStack {
+                            Label(BiluxFormat.day(session.date), systemImage: "book.pages.fill")
+                                .font(.caption.bold()).foregroundStyle(Nuclear.gold)
+                            Spacer()
+                            Text("\(max(0, session.durationMinutes)) min")
+                                .font(.caption.monospacedDigit()).foregroundStyle(Nuclear.muted)
+                        }
+                        Text("CHAPITRE · \(session.activity.uppercased())")
+                            .font(.system(size: 13, weight: .heavy, design: .rounded))
+                            .foregroundStyle(.white)
+                        Text("La Forge garde la trace de cette séance : \(session.exercises.count) exercice\(session.exercises.count > 1 ? "s" : ""), \(BiluxFormat.number(session.volume)) kg·rép de volume consigné.")
+                            .font(.caption).foregroundStyle(Nuclear.muted)
+                    }
+                }
+            }
+            if journal.data.workouts.count > 20 {
+                Text("Derniers 20 chapitres affichés sur \(journal.data.workouts.count) séances enregistrées.")
+                    .font(.caption2).foregroundStyle(Nuclear.muted)
+            }
+        }
+    }
+
+    private var gallery: some View {
+        VStack(alignment: .leading, spacing: 13) {
+            SectionCaption(title: "Galerie des transformations")
+            Text("Les cinq formes originales de BILUX. Tu peux revoir la cinématique d'un rang acquis, sans gagner d'XP.")
+                .font(.caption).foregroundStyle(Nuclear.muted)
+            ForEach(NuclearStage.all) { stage in
+                let unlocked = stage.id <= journal.unlockedStageIndex
+                NuclearCard {
+                    HStack(spacing: 13) {
+                        Image(stage.artwork)
+                            .resizable().scaledToFill()
+                            .frame(width: 100, height: 126)
+                            .clipped()
+                            .clipShape(RoundedRectangle(cornerRadius: 12))
+                            .saturation(unlocked ? 1 : 0)
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 9) {
+                            Text(stage.name)
+                                .font(.headline.bold()).foregroundStyle(unlocked ? stage.accent : Nuclear.muted)
+                            Text(stage.subtitle)
+                                .font(.caption).foregroundStyle(.white)
+                            Label(unlocked ? "FORME DÉBLOQUÉE" : "NIVEAU \(stage.minLevel) REQUIS", systemImage: unlocked ? "checkmark.seal.fill" : "lock.fill")
+                                .font(.caption2.bold()).foregroundStyle(unlocked ? Nuclear.paleGold : Nuclear.muted)
+                            if unlocked {
+                                Button { cinematicStage = stage } label: {
+                                    Label("REVOIR", systemImage: "film.stack.fill")
+                                        .font(.caption.bold())
+                                }
+                                .tint(stage.accent)
+                            }
+                        }
+                        Spacer(minLength: 0)
+                    }
+                }
+            }
+        }
+    }
+
+    private var secrets: some View {
+        let guardian = BILUXV58Archive.victories(journal.data, against: .guardian)
+        let sovereign = BILUXV58Archive.victories(journal.data, against: .sovereign)
+        let items: [(title: String, condition: String, unlocked: Bool, story: String, icon: String)] = [
+            ("LA PREMIÈRE FAILLE", "Consigner 10 séances", journal.data.workouts.count >= 10,
+             "Le métal a cédé pour la première fois. Le survivant comprend que la constance peut fissurer l'impossible.", "bolt.fill"),
+            ("LE CHANT DU RÉACTEUR", "Atteindre le niveau 31", journal.heroLevel >= 31,
+             "Un battement régulier traverse la Forge : la puissance naît de la maîtrise, non de la précipitation.", "waveform.path"),
+            ("L'EMBLÈME DU GARDIEN", "Vaincre le Gardien depuis V5.5", guardian > 0,
+             "La sentinelle du noyau reconnaît un adversaire patient. Son emblème entre dans les archives.", "shield.fill"),
+            ("LE SCEAU DU NÉANT", "Vaincre le Souverain depuis V5.5", sovereign > 0,
+             "La ténacité a traversé une saison entière. Le Néant ne peut effacer ce qui a été construit.", "crown.fill"),
+            ("LA PORTE D'ASCENSION", "Atteindre le niveau 81", journal.heroLevel >= 81,
+             "Au-delà des rangs connus, un nouveau seuil apparaît. La légende ne fait que commencer.", "sparkles"),
+            ("LE NOM ÉTERNEL", "Atteindre le niveau 100", journal.heroLevel >= 100,
+             "MAÎTRISE ULTIME. Cent étapes gravées dans le Codex : aucun jour de repos ne les effacera.", "star.circle.fill")
+        ]
+        return VStack(alignment: .leading, spacing: 13) {
+            SectionCaption(title: "Secrets du réacteur")
+            Text("Titres et fragments de légende se dévoilent avec le temps. Aucune mission cachée ne rapporte d'XP supplémentaire.")
+                .font(.caption).foregroundStyle(Nuclear.muted)
+            ForEach(Array(items.enumerated()), id: \.offset) { entry in
+                let item = entry.element
+                NuclearCard {
+                    HStack(alignment: .top, spacing: 12) {
+                        Image(systemName: item.unlocked ? item.icon : "lock.fill")
+                            .font(.title2).foregroundStyle(item.unlocked ? Nuclear.gold : Nuclear.muted)
+                            .frame(width: 30)
+                        VStack(alignment: .leading, spacing: 7) {
+                            Text(item.unlocked ? item.title : "FRAGMENT SCELLÉ")
+                                .font(.system(size: 13, weight: .black, design: .rounded))
+                                .foregroundStyle(item.unlocked ? Nuclear.paleGold : Nuclear.muted)
+                            Text(item.condition)
+                                .font(.caption2).foregroundStyle(Nuclear.muted)
+                            if item.unlocked {
+                                Text(item.story).font(.subheadline).foregroundStyle(.white)
+                            } else {
+                                Text("Le Codex révélera ce fragment une fois la condition atteinte.")
+                                    .font(.caption).foregroundStyle(Nuclear.muted)
+                            }
+                        }
+                    }
+                }
+                .opacity(item.unlocked ? 1 : 0.67)
+            }
+        }
     }
 }
