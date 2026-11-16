@@ -43,6 +43,16 @@ final class WatchPhoneBridge: NSObject, WCSessionDelegate {
         let didEat = questStatus.todayMeal
         let didCheckin = questStatus.todayCheckin
         let appearance = journal.map { BILUXV60WatchAppearance($0) }
+        let mastery = V63MasterySnapshot.evaluate(data)
+        let masteryPaths: [WatchMasteryPath] = mastery.branches.map { branch in
+            WatchMasteryPath(
+                id: branch.id, title: branch.title, symbol: branch.icon,
+                current: branch.current, target: branch.ultimateTarget,
+                unlocked: branch.unlockedCount, total: branch.nodes.count,
+                nextTitle: branch.next?.title, remaining: branch.next?.remaining,
+                unit: branch.unit
+            )
+        }
         let latest = data.workouts.max(by: { $0.date < $1.date })
         let lastLabel = latest.map { "\($0.activity) · \($0.durationMinutes) min" }
         snapshot = WatchSnapshot(
@@ -63,7 +73,8 @@ final class WatchPhoneBridge: NSObject, WCSessionDelegate {
             workoutCount: data.workouts.count,
             lastWorkoutLabel: lastLabel,
             equippedTitle: appearance?.title,
-            equippedAura: appearance?.aura
+            equippedAura: appearance?.aura,
+            masteryPaths: masteryPaths
         )
         sendSnapshot()
     }

@@ -10,6 +10,21 @@ struct WatchQuest: Codable, Identifiable {
     var reward: Int
 }
 
+// Résumé compact, calculé exclusivement depuis le moteur V6.3 sur l'iPhone.
+// Aucun dossier médical, aucune séance individuelle et aucune donnée HealthKit ajoutés.
+struct WatchMasteryPath: Codable, Identifiable {
+    var id: String
+    var title: String
+    var symbol: String
+    var current: Int
+    var target: Int
+    var unlocked: Int
+    var total: Int
+    var nextTitle: String?
+    var remaining: Int?
+    var unit: String
+}
+
 struct WatchSnapshot: Codable {
     var heroName: String
     var level: Int
@@ -34,6 +49,8 @@ struct WatchSnapshot: Codable {
     var lastWorkoutLabel: String? = nil
     var equippedTitle: String? = nil
     var equippedAura: String? = nil
+    // Optionnel pour relire sans migration les snapshots des anciennes versions.
+    var masteryPaths: [WatchMasteryPath]? = nil
 
     static let empty = WatchSnapshot(
         heroName: "BILUX", level: 1, rank: "SURVIVANT", totalXP: 0,

@@ -283,12 +283,13 @@ struct WatchRootView: View {
 
     var body: some View {
         TabView(selection: $selectedPage) {
-            commandPage.tag(0)
+            V68WatchDashboard(selectedPage: $selectedPage).tag(0)
             healthPage.tag(1)
             questPage.tag(2)
             ascensionPage.tag(3)
             V54WatchWorkoutView().tag(4)
             V61LiveWorkoutView().tag(5)
+            V68WatchMasteryPage().tag(6)
         }
         .tabViewStyle(.verticalPage)
         .background {
@@ -1218,5 +1219,287 @@ private struct V61LiveWorkoutView: View {
             .padding(.bottom, 8)
         }
         .containerBackground(.clear, for: .tabView)
+    }
+}
+
+// MARK: - BILUX V6.8 · NUCLEAR WATCH 4.0
+// Interface ultra-lisible : les données RPG sont calculées sur l'iPhone et synchronisées.
+// Cet écran ne décerne aucun XP et ne modifie pas les séances HealthKit.
+
+private struct V68ReactorCore: View {
+    let fraction: Double
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var awakened = false
+
+    private var progress: Double {
+        fraction.isFinite ? min(1, max(0, fraction)) : 0
+    }
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(V54ReactorTheme.purple.opacity(0.24))
+                .blur(radius: 13)
+                .padding(8)
+            Circle()
+                .stroke(V54ReactorTheme.purple.opacity(0.35), lineWidth: 1.5)
+                .scaleEffect(awakened && !reduceMotion ? 1.09 : 0.95)
+            Circle()
+                .stroke(V54ReactorTheme.paleGold.opacity(0.14), lineWidth: 6)
+            Circle()
+                .trim(from: 0, to: progress)
+                .stroke(
+                    AngularGradient(
+                        colors: [V54ReactorTheme.purple, V54ReactorTheme.gold, V54ReactorTheme.paleGold],
+                        center: .center
+                    ),
+                    style: StrokeStyle(lineWidth: 6, lineCap: .round)
+                )
+                .rotationEffect(.degrees(-90))
+            Circle()
+                .stroke(V54ReactorTheme.purple.opacity(0.35), lineWidth: 1)
+                .padding(11)
+            Image(systemName: "atom")
+                .font(.system(size: 29, weight: .regular))
+                .foregroundStyle(V54ReactorTheme.gold)
+                .shadow(color: V54ReactorTheme.gold.opacity(0.45), radius: 6)
+        }
+        .frame(width: 88, height: 88)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 3.0).repeatForever(autoreverses: true),
+                   value: awakened)
+        .onAppear { awakened = !reduceMotion }
+        .onDisappear { awakened = false }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Réacteur nucléaire, progression vers le prochain niveau : \(Int((progress * 100).rounded())) pour cent")
+    }
+}
+
+private struct V68WatchDashboard: View {
+    @EnvironmentObject private var bridge: WatchBridge
+    @Binding var selectedPage: Int
+
+    private var masteredCount: Int {
+        bridge.snapshot.masteryPaths?.reduce(0, { $0 + $1.unlocked }) ?? 0
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(spacing: 5) {
+                    Image(systemName: "bolt.shield.fill")
+                        .foregroundStyle(V54ReactorTheme.gold)
+                    Text("BILUX")
+                        .font(.system(size: 19, weight: .black, design: .rounded))
+                        .tracking(2)
+                    Spacer(minLength: 2)
+                    Text("WATCH 4.0")
+                        .font(.system(size: 8, weight: .heavy, design: .rounded))
+                        .foregroundStyle(V54ReactorTheme.paleGold)
+                }
+
+                V54ReactorCard(accent: V54ReactorTheme.gold) {
+                    HStack(alignment: .center, spacing: 10) {
+                        V68ReactorCore(fraction: bridge.snapshot.xpProgress)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(bridge.snapshot.rank.uppercased())
+                                .font(.system(size: 10, weight: .black))
+                                .foregroundStyle(V54ReactorTheme.gold)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
+                            Text("NIV. \(bridge.snapshot.level)")
+                                .font(.system(size: 19, weight: .black, design: .rounded))
+                                .monospacedDigit()
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.6)
+                            Text("\(bridge.snapshot.totalXP) XP")
+                                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                .foregroundStyle(V54ReactorTheme.paleGold)
+                                .monospacedDigit()
+                            if let xp = bridge.snapshot.xpRemaining {
+                                Text(xp == 0 ? "NIVEAU MAX" : "Encore \(xp) XP")
+                                    .font(.system(size: 9, weight: .medium))
+                                    .foregroundStyle(V54ReactorTheme.secondary)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.75)
+                            }
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    if let title = bridge.snapshot.equippedTitle, !title.isEmpty {
+                        Label(title, systemImage: "crown.fill")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(V54ReactorTheme.paleGold)
+                            .lineLimit(2)
+                    }
+                }
+
+                if let paths = bridge.snapshot.masteryPaths, !paths.isEmpty {
+                    V54ReactorCard(accent: V54ReactorTheme.purple) {
+                        HStack {
+                            Label("MAÎTRISE", systemImage: "sparkles")
+                                .font(.system(size: 10, weight: .heavy))
+                                .foregroundStyle(V54ReactorTheme.paleGold)
+                            Spacer(minLength: 3)
+                            Text("\(masteredCount) / 12")
+                                .font(.system(size: 12, weight: .black, design: .rounded))
+                                .foregroundStyle(V54ReactorTheme.gold)
+                        }
+                        HStack(spacing: 3) {
+                            ForEach(paths) { path in
+                                RoundedRectangle(cornerRadius: 2)
+                                    .fill(path.unlocked > 0 ? V54ReactorTheme.gold : V54ReactorTheme.purple.opacity(0.3))
+                                    .frame(height: 6)
+                                    .accessibilityLabel("\(path.title), \(path.unlocked) capacités acquises")
+                            }
+                        }
+                    }
+                }
+
+                Button {
+                    selectedPage = 5 // Identifiant historique : complication ⚡ LIVE.
+                } label: {
+                    HStack {
+                        Image(systemName: "heart.fill")
+                        Text("NUCLEAR LIVE")
+                            .font(.system(size: 13, weight: .black, design: .rounded))
+                        Spacer(minLength: 0)
+                        Image(systemName: "arrow.up.right")
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(V54ReactorTheme.purple)
+
+                HStack(spacing: 6) {
+                    Button { selectedPage = 6 } label: {
+                        Label("MAÎTRISES", systemImage: "crown.fill")
+                            .font(.system(size: 10, weight: .bold))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(V54ReactorTheme.gold)
+                    Button { selectedPage = 3 } label: {
+                        Label("GARDIENS", systemImage: "shield.fill")
+                            .font(.system(size: 10, weight: .bold))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(V54ReactorTheme.gold)
+                }
+
+                Button { selectedPage = 4 } label: {
+                    Label("FORGE MANUELLE", systemImage: "dumbbell.fill")
+                        .font(.system(size: 10, weight: .semibold))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .tint(V54ReactorTheme.gold)
+
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                    if bridge.snapshot.updatedAt == .distantPast {
+                        Text("Ouvre BILUX sur l'iPhone pour synchroniser")
+                    } else {
+                        Text("Synchronisé \(bridge.snapshot.updatedAt.formatted(date: .omitted, time: .shortened))")
+                    }
+                    Spacer(minLength: 0)
+                    Button { bridge.refresh() } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Actualiser les données RPG depuis l'iPhone")
+                }
+                .font(.system(size: 9))
+                .foregroundStyle(V54ReactorTheme.secondary)
+            }
+            .padding(.horizontal, 5)
+            .padding(.bottom, 8)
+        }
+        .containerBackground(.clear, for: .tabView)
+    }
+}
+
+private struct V68WatchMasteryPage: View {
+    @EnvironmentObject private var bridge: WatchBridge
+
+    private var totalUnlocked: Int {
+        bridge.snapshot.masteryPaths?.reduce(0, { $0 + $1.unlocked }) ?? 0
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 9) {
+                V54ReactorTitle(text: "LES QUATRE VOIES", symbol: "crown.fill")
+                V54ReactorCard(accent: V54ReactorTheme.gold) {
+                    Text("\(totalUnlocked) / 12 CAPACITÉS")
+                        .font(.system(size: 17, weight: .black, design: .rounded))
+                        .foregroundStyle(V54ReactorTheme.paleGold)
+                    Text("Progrès issus de tes séances enregistrées sur l'iPhone.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(V54ReactorTheme.secondary)
+                }
+                if let paths = bridge.snapshot.masteryPaths, !paths.isEmpty {
+                    ForEach(paths) { path in
+                        masteryCard(path)
+                    }
+                } else {
+                    V54ReactorCard(accent: V54ReactorTheme.purple) {
+                        Label("Données de maîtrise en attente", systemImage: "iphone.gen3")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text("Ouvre BILUX sur l'iPhone, puis synchronise la montre.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(V54ReactorTheme.secondary)
+                        Button("Synchroniser") { bridge.refresh() }
+                            .buttonStyle(.borderedProminent)
+                            .tint(V54ReactorTheme.purple)
+                    }
+                }
+                Text("Compétences cosmétiques : ni XP supplémentaire, ni perte pendant le repos.")
+                    .font(.system(size: 9))
+                    .foregroundStyle(V54ReactorTheme.secondary)
+            }
+            .padding(.horizontal, 5)
+            .padding(.bottom, 8)
+        }
+        .containerBackground(.clear, for: .tabView)
+    }
+
+    private func masteryCard(_ path: WatchMasteryPath) -> some View {
+        V54ReactorCard(accent: path.unlocked == path.total ? V54ReactorTheme.gold : V54ReactorTheme.purple) {
+            HStack(alignment: .center, spacing: 6) {
+                Image(systemName: path.symbol)
+                    .foregroundStyle(V54ReactorTheme.gold)
+                Text(path.title)
+                    .font(.system(size: 12, weight: .heavy, design: .rounded))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Spacer(minLength: 2)
+                Text("\(path.unlocked)/\(path.total)")
+                    .font(.system(size: 11, weight: .black))
+                    .foregroundStyle(V54ReactorTheme.paleGold)
+                    .monospacedDigit()
+            }
+            ProgressView(value: Double(min(max(0, path.current), max(1, path.target))),
+                         total: Double(max(1, path.target)))
+                .tint(V54ReactorTheme.gold)
+            Text("\(path.current) / \(path.target) \(path.unit)")
+                .font(.system(size: 10))
+                .foregroundStyle(V54ReactorTheme.secondary)
+                .lineLimit(2)
+            if let next = path.nextTitle, let remaining = path.remaining {
+                Text("PROCHAIN : \(next)")
+                    .font(.system(size: 9, weight: .heavy))
+                    .foregroundStyle(V54ReactorTheme.paleGold)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Encore \(remaining) \(path.unit)")
+                    .font(.system(size: 9))
+                    .foregroundStyle(V54ReactorTheme.secondary)
+            } else {
+                Label("VOIE ACCOMPLIE", systemImage: "checkmark.seal.fill")
+                    .font(.system(size: 10, weight: .heavy))
+                    .foregroundStyle(V54ReactorTheme.gold)
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 }
