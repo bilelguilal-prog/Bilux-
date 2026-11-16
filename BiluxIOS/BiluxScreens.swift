@@ -1667,6 +1667,7 @@ struct AscensionScreen: View {
                     .disabled(selectedStage > journal.unlockedStageIndex)
                     .accessibilityIdentifier("bilux.v67.openImmersion.ascension")
                     V72AwakeningEntry().environmentObject(journal)
+                    V73EternalForgeEntry().environmentObject(journal)
                     SectionCaption(title: "Ton ascension")
                     NuclearCard {
                         HStack(spacing: 17) {
@@ -3882,6 +3883,7 @@ private struct V70RebirthCommandDeck: View {
                     .font(.system(size: 24, weight: .medium)).foregroundStyle(Nuclear.gold)
                     .accessibilityHidden(true)
             }
+            V73EternalForgeEntry().environmentObject(journal)
             V72AwakeningEntry().environmentObject(journal)
             HStack(spacing: 9) {
                 V70RebirthTile(title: "SÉANCES / 7 J", value: "\(week.count)",
@@ -3973,6 +3975,7 @@ private struct V70ForgeSportEntry: View {
                     .font(.subheadline.bold()).frame(maxWidth: .infinity, minHeight: 42)
             }
             .buttonStyle(.bordered).tint(Nuclear.purple)
+            V73EternalForgeEntry().environmentObject(journal)
             NavigationLink {
                 V71ExercisePerformance().environmentObject(journal)
             } label: {
@@ -3998,6 +4001,7 @@ private struct V70DraftSet: Identifiable {
 private struct V70NuclearForge: View {
     @EnvironmentObject private var journal: BiluxStore
     @Environment(\.dismiss) private var dismiss
+    var launch: V73ForgeLaunch? = nil
 
     @State private var sessionDate = Date()
     @State private var duration = "60"
@@ -4009,6 +4013,7 @@ private struct V70NuclearForge: View {
     @State private var errorText: String?
     @State private var saved = false
     @State private var achievedRecords: [String] = []
+    @State private var programLinkWarning: String?
     @State private var showRecordCelebration = false
     @State private var restUntil: Date?
 
@@ -4139,6 +4144,10 @@ private struct V70NuclearForge: View {
                     if saved {
                         Label("SÉANCE ENREGISTRÉE", systemImage: "checkmark.seal.fill")
                             .font(.headline).foregroundStyle(Nuclear.gold)
+                        if let programLinkWarning {
+                            Text(programLinkWarning)
+                                .font(.caption).foregroundStyle(Nuclear.purple)
+                        }
                         if !achievedRecords.isEmpty {
                             Label("RECORD BRISÉ ⚡", systemImage: "bolt.fill")
                                 .font(.title3.weight(.black)).foregroundStyle(Nuclear.purple)
@@ -4170,6 +4179,7 @@ private struct V70NuclearForge: View {
         }
         .navigationBarTitleDisplayMode(.inline)
         .modifier(PageBackground())
+        .onAppear(perform: prefillFromProgram)
         .alert("Vérifie la séance", isPresented: Binding(
             get: { errorText != nil },
             set: { if !$0 { errorText = nil } }
@@ -4178,6 +4188,19 @@ private struct V70NuclearForge: View {
         } message: {
             Text(errorText ?? "")
         }
+    }
+
+    private func prefillFromProgram() {
+        guard let launch, !saved, prepared.isEmpty,
+              exerciseName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        prepared = launch.day.exercises.map { target in
+            let sets = (0..<target.sets).map { _ in
+                WorkoutSet(reps: target.reps, weight: target.weight)
+            }
+            return WorkoutExercise(name: target.name, sets: sets)
+        }
+        duration = String(launch.day.durationMinutes)
+        notes = "Programme : \(launch.planName) · \(launch.day.title)"
     }
 
     private func makeCurrentExercise() -> WorkoutExercise? {
@@ -4231,9 +4254,17 @@ private struct V70NuclearForge: View {
                 newRecords.append("\(exercise.name) · \(V70RebirthStyle.weight(bestWeight)) kg")
             }
         }
-        journal.add(WorkoutSession(date: sessionDate, activity: "Musculation",
-                                   durationMinutes: minutes, notes: notes, rpe: rpe,
-                                   exercises: exercises))
+        let savedWorkout = WorkoutSession(date: sessionDate, activity: "Musculation",
+                                           durationMinutes: minutes, notes: notes, rpe: rpe,
+                                           exercises: exercises)
+        journal.add(savedWorkout)
+        if let launch {
+            do {
+                try V73LedgerStore.link(launch, to: savedWorkout)
+            } catch {
+                programLinkWarning = "Séance enregistrée mais non reliée à la campagne : \(error.localizedDescription)"
+            }
+        }
         achievedRecords = Array(Set(newRecords)).sorted()
         saved = true
         showRecordCelebration = !achievedRecords.isEmpty
@@ -5207,5 +5238,796 @@ private struct V72MilestoneCinema: View {
             guard !Task.isCancelled else { return }
             withAnimation(.easeOut(duration: 0.25)) { phase = 3 }
         }
+    }
+}
+
+// MARK: - BILUX V7.3 · ETERNAL FORGE
+// Programmes locaux, séances reliées au journal existant et campagne cosmétique.
+// Aucun changement à BiluxData, BILUXV55Progression, HealthKit ou WatchConnectivity.
+
+private struct V73ExerciseTarget: Codable, Identifiable {
+    var id: UUID = UUID()
+    var name: String
+    var sets: Int
+    var reps: Int
+    var weight: Double
+}
+
+private struct V73PlannedDay: Codable, Identifiable {
+    var id: UUID = UUID()
+    var title: String
+    var muscleGroup: String
+    var durationMinutes: Int
+    var exercises: [V73ExerciseTarget]
+}
+
+private struct V73TrainingPlan: Codable, Identifiable {
+    var id: UUID = UUID()
+    var title: String
+    var createdAt: Date
+    var days: [V73PlannedDay]
+    var archived: Bool = false
+}
+
+private struct V73LinkedSession: Codable, Identifiable {
+    var id: UUID = UUID()
+    var planID: UUID
+    var dayID: UUID
+    var workoutID: UUID
+    var recordedAt: Date
+}
+
+private struct V73Ledger: Codable {
+    var schema: Int = 1
+    var plans: [V73TrainingPlan] = []
+    var linkedSessions: [V73LinkedSession] = []
+    var celebratedPlanIDs: [UUID] = []
+    var highestRelicThreshold: [UUID: Int] = [:]
+    var firstVictoryDates: [UUID: Date] = [:]
+}
+
+private enum V73LedgerStore {
+    static let key = "bilux.v73.eternalforge.ledger.v1"
+    static let didChange = Notification.Name("bilux.v73.eternalforge.changed")
+
+    static func load() throws -> V73Ledger {
+        guard let raw = UserDefaults.standard.data(forKey: key) else { return V73Ledger() }
+        let ledger = try JSONDecoder().decode(V73Ledger.self, from: raw)
+        guard ledger.schema == 1 else { throw V73StorageIssue.unsupportedVersion }
+        return ledger
+    }
+
+    static func persist(_ ledger: V73Ledger) throws {
+        guard ledger.plans.count <= 100,
+              ledger.linkedSessions.count <= 20_000 else { throw V73StorageIssue.invalidBackup }
+        let raw = try JSONEncoder().encode(ledger)
+        UserDefaults.standard.set(raw, forKey: key)
+        NotificationCenter.default.post(name: didChange, object: nil)
+    }
+
+    static func link(_ launch: V73ForgeLaunch, to workout: WorkoutSession) throws {
+        var ledger = try load()
+        guard ledger.plans.contains(where: { $0.id == launch.planID && $0.days.contains(where: { $0.id == launch.dayID }) }) else {
+            throw V73StorageIssue.missingPlan
+        }
+        guard !ledger.linkedSessions.contains(where: { $0.workoutID == workout.id }) else { return }
+        ledger.linkedSessions.append(V73LinkedSession(planID: launch.planID, dayID: launch.dayID,
+                                                       workoutID: workout.id, recordedAt: workout.date))
+        try persist(ledger)
+    }
+
+    static func exportURL(_ ledger: V73Ledger) throws -> URL {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("BILUX-V7.3-programmes-sauvegarde.json")
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(ledger).write(to: file, options: [.atomic, .completeFileProtection])
+        return file
+    }
+
+    static func importBackup(_ url: URL, into current: V73Ledger) throws -> V73Ledger {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        let raw = try Data(contentsOf: url)
+        guard raw.count < 3_000_000 else { throw V73StorageIssue.invalidBackup }
+        let imported = try JSONDecoder().decode(V73Ledger.self, from: raw)
+        guard imported.schema == 1, imported.plans.count <= 100,
+              imported.linkedSessions.count <= 20_000,
+              imported.plans.allSatisfy({ $0.days.count <= 7 && $0.title.count <= 80 &&
+                  $0.days.allSatisfy({ $0.exercises.count <= 12 && $0.durationMinutes >= 10 && $0.durationMinutes <= 240 &&
+                      $0.exercises.allSatisfy({ $0.name.count <= 80 && (1...12).contains($0.sets) &&
+                          (1...100).contains($0.reps) && $0.weight.isFinite && (0...1000).contains($0.weight) }) }) })
+        else { throw V73StorageIssue.invalidBackup }
+        var merged = current
+        var ids = Set(merged.plans.map(\.id))
+        for plan in imported.plans where ids.insert(plan.id).inserted { merged.plans.append(plan) }
+        let planIDs = Set(merged.plans.map(\.id))
+        var workoutIDs = Set(merged.linkedSessions.map(\.workoutID))
+        for entry in imported.linkedSessions where planIDs.contains(entry.planID) && workoutIDs.insert(entry.workoutID).inserted {
+            merged.linkedSessions.append(entry)
+        }
+        merged.celebratedPlanIDs = Array(Set(merged.celebratedPlanIDs + imported.celebratedPlanIDs))
+        for (id, threshold) in imported.highestRelicThreshold where planIDs.contains(id) {
+            merged.highestRelicThreshold[id] = max(merged.highestRelicThreshold[id] ?? 0, min(12, max(0, threshold)))
+        }
+        for (id, date) in imported.firstVictoryDates where planIDs.contains(id) {
+            if let previous = merged.firstVictoryDates[id] {
+                merged.firstVictoryDates[id] = min(date, previous)
+            } else { merged.firstVictoryDates[id] = date }
+        }
+        return merged
+    }
+}
+
+private enum V73StorageIssue: LocalizedError {
+    case unsupportedVersion, invalidBackup, missingPlan
+    var errorDescription: String? {
+        switch self {
+        case .unsupportedVersion: return "Version de sauvegarde des programmes non reconnue. Aucune donnée n'a été remplacée."
+        case .invalidBackup: return "Sauvegarde des programmes invalide ou trop volumineuse."
+        case .missingPlan: return "Programme source introuvable. La séance du journal reste enregistrée."
+        }
+    }
+}
+
+private struct V73ForgeLaunch {
+    let planID: UUID
+    let dayID: UUID
+    let planName: String
+    let day: V73PlannedDay
+}
+
+private struct V73CampaignProgress {
+    let sessions: [WorkoutSession]  // Une seule séance admissible par jour, cinq par semaine au plus.
+    var completed: Int { sessions.count }
+    var counted: Int { min(12, completed) }
+    var fraction: Double { Double(counted) / 12.0 }
+    var hitPoints: Int { max(0, (12 - counted) * 100) }
+    var defeated: Bool { counted >= 12 }
+    var victoryDate: Date? { defeated ? sessions[11].date : nil }
+    var phase: String {
+        switch counted {
+        case 12...: return "VICTOIRE · NÉANT VAINCU"
+        case 8...: return "PHASE IV · LE DERNIER REMPART"
+        case 4...: return "PHASE III · ARMURE FRACTURÉE"
+        case 2...: return "PHASE II · LE NOYAU S'ÉVEILLE"
+        default: return "PHASE I · ÉCHO DES TÉNÈBRES"
+        }
+    }
+    var relics: [String] {
+        var result: [String] = []
+        if counted >= 4 { result.append("Sceau de la Brèche") }
+        if counted >= 8 { result.append("Aura des Cendres") }
+        if defeated { result.append("Couronne du Néant") }
+        return result
+    }
+}
+
+private enum V73CampaignEngine {
+    static func linkedWorkouts(plan: V73TrainingPlan, ledger: V73Ledger,
+                               workouts: [WorkoutSession], now: Date = .now) -> [WorkoutSession] {
+        var byID: [UUID: WorkoutSession] = [:]
+        for item in workouts { byID[item.id] = item }
+        let days: [UUID: V73PlannedDay] = Dictionary(uniqueKeysWithValues: plan.days.map { ($0.id, $0) })
+        let calendar = Calendar.current
+        let firstDay = calendar.startOfDay(for: plan.createdAt)
+        var seen = Set<UUID>()
+        var accepted: [WorkoutSession] = []
+        for link in ledger.linkedSessions where link.planID == plan.id {
+            guard seen.insert(link.workoutID).inserted,
+                  let day = days[link.dayID], let workout = byID[link.workoutID],
+                  workout.date <= now, calendar.startOfDay(for: workout.date) >= firstDay,
+                  workout.durationMinutes >= 10, !day.exercises.isEmpty else { continue }
+            let completedNames = Set(workout.exercises.filter { !$0.sets.isEmpty }
+                .map { V70RebirthStyle.name($0.name) })
+            let targetNames = Set(day.exercises.map { V70RebirthStyle.name($0.name) })
+            guard targetNames.isSubset(of: completedNames) else { continue }
+            accepted.append(workout)
+        }
+        accepted.sort { $0.date == $1.date ? $0.id.uuidString < $1.id.uuidString : $0.date < $1.date }
+        var onePerDay = Set<Date>()
+        var perWeek: [Date: Int] = [:]
+        return accepted.filter { workout in
+            let day = calendar.startOfDay(for: workout.date)
+            let week = calendar.dateInterval(of: .weekOfYear, for: day)?.start ?? day
+            guard !onePerDay.contains(day), perWeek[week, default: 0] < 5 else { return false }
+            onePerDay.insert(day)
+            perWeek[week, default: 0] += 1
+            return true
+        }
+    }
+
+    static func progress(plan: V73TrainingPlan, ledger: V73Ledger,
+                         workouts: [WorkoutSession]) -> V73CampaignProgress {
+        V73CampaignProgress(sessions: linkedWorkouts(plan: plan, ledger: ledger, workouts: workouts))
+    }
+}
+
+private struct V73EternalForgeEntry: View {
+    @EnvironmentObject private var journal: BiluxStore
+    var body: some View {
+        NavigationLink {
+            V73EternalForgeHub().environmentObject(journal)
+        } label: {
+            HStack(spacing: 11) {
+                Image(systemName: "flame.circle.fill")
+                    .font(.system(size: 32)).foregroundStyle(Nuclear.gold)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("ETERNAL FORGE · V7.3")
+                        .font(.caption.weight(.black)).tracking(1.2).foregroundStyle(Nuclear.gold)
+                    Text("PROGRAMMES & CAMPAGNES RPG")
+                        .font(.subheadline.weight(.heavy)).foregroundStyle(.white)
+                    Text("Séances planifiées · boss évolutif · récompenses visuelles")
+                        .font(.caption2).foregroundStyle(Nuclear.muted)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: "chevron.right").foregroundStyle(Nuclear.gold)
+            }
+            .padding(13)
+            .background(Nuclear.panel, in: RoundedRectangle(cornerRadius: 16))
+            .overlay(RoundedRectangle(cornerRadius: 16).stroke(Nuclear.purple.opacity(0.7), lineWidth: 1.3))
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("bilux.v73.eternalForge")
+    }
+}
+
+private struct V73EternalForgeHub: View {
+    @EnvironmentObject private var journal: BiluxStore
+    @State private var ledger = V73Ledger()
+    @State private var showEditor = false
+    @State private var showImporter = false
+    @State private var fileToShare: URL?
+    @State private var message: String?
+    @State private var canEdit = true
+
+    private var activePlans: [V73TrainingPlan] { ledger.plans.filter { !$0.archived } }
+    private var archivedPlans: [V73TrainingPlan] { ledger.plans.filter(\.archived) }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                Label("ETERNAL FORGE · V7.3", systemImage: "flame.fill")
+                    .font(.title2.weight(.black)).foregroundStyle(Nuclear.gold)
+                Text("Construis ton programme, enregistre tes vraies séances dans la Forge, fais reculer le Néant.")
+                    .font(.subheadline).foregroundStyle(Nuclear.muted)
+
+                NuclearCard {
+                    HStack {
+                        Label("PROGRAMMES", systemImage: "calendar.badge.plus")
+                            .font(.headline).foregroundStyle(Nuclear.paleGold)
+                        Spacer()
+                        Text("\(activePlans.count) actif(s)")
+                            .font(.caption).foregroundStyle(Nuclear.gold)
+                    }
+                    Button {
+                        showEditor = true
+                    } label: {
+                        Label("CRÉER UN PROGRAMME", systemImage: "plus.circle.fill")
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    .buttonStyle(.borderedProminent).tint(Nuclear.gold)
+                    .disabled(!canEdit || ledger.plans.count >= 100)
+                }
+
+                if activePlans.isEmpty {
+                    NuclearCard {
+                        Text("Aucun programme pour le moment.")
+                            .font(.subheadline.bold()).foregroundStyle(Nuclear.paleGold)
+                        Text("Crée une ou plusieurs journées de musculation. Tu décideras librement quand les effectuer.")
+                            .font(.caption).foregroundStyle(Nuclear.muted)
+                    }
+                }
+                ForEach(activePlans) { plan in
+                    V73PlanRow(plan: plan, ledger: ledger, workouts: journal.data.workouts)
+                        .environmentObject(journal)
+                }
+
+                NuclearCard {
+                    SectionCaption(title: "Les Gardiens historiques")
+                    Text("Les boss des versions précédentes restent inchangés : les séances de campagne ne donnent pas un deuxième bonus d'XP.")
+                        .font(.caption).foregroundStyle(Nuclear.muted)
+                    HStack {
+                        Text("Gardien du Réacteur")
+                        Spacer()
+                        Text("\(BILUXV56Boss.guardian.countedDays(in: journal.data))/12 jours")
+                            .foregroundStyle(Nuclear.gold)
+                    }.font(.caption)
+                    HStack {
+                        Text("Souverain du Néant")
+                        Spacer()
+                        Text("\(BILUXV56Boss.sovereign.countedDays(in: journal.data))/30 jours")
+                            .foregroundStyle(Nuclear.purple)
+                    }.font(.caption)
+                }
+
+                if !archivedPlans.isEmpty {
+                    SectionCaption(title: "Programmes archivés")
+                    ForEach(archivedPlans) { plan in
+                        V73PlanRow(plan: plan, ledger: ledger, workouts: journal.data.workouts)
+                            .environmentObject(journal)
+                    }
+                }
+
+                NuclearCard {
+                    SectionCaption(title: "Sauvegarde des programmes")
+                    Text("Les programmes sont stockés localement, séparément de l'ancien journal JSON BILUX. Exporte aussi ce fichier pour les conserver en cas de réinstallation.")
+                        .font(.caption).foregroundStyle(Nuclear.muted)
+                    Button("PRÉPARER LE FICHIER DE SAUVEGARDE") {
+                        do { fileToShare = try V73LedgerStore.exportURL(ledger) }
+                        catch { message = error.localizedDescription }
+                    }
+                    .font(.caption.bold()).disabled(!canEdit)
+                    if let fileToShare {
+                        ShareLink(item: fileToShare) {
+                            Label("PARTAGER / ENREGISTRER LE JSON", systemImage: "square.and.arrow.up")
+                                .font(.caption.bold()).frame(maxWidth: .infinity, minHeight: 38)
+                        }.buttonStyle(.bordered).tint(Nuclear.gold)
+                    }
+                    Button("IMPORTER UNE SAUVEGARDE DE PROGRAMMES") { showImporter = true }
+                        .font(.caption.bold()).disabled(!canEdit)
+                }
+                Text("Repos libres, zéro pénalité et zéro XP supplémentaire. Les objectifs de charge sont indicatifs.")
+                    .font(.caption2).foregroundStyle(Nuclear.muted)
+            }
+            .padding(15)
+        }
+        .navigationTitle("Eternal Forge")
+        .navigationBarTitleDisplayMode(.inline)
+        .modifier(PageBackground())
+        .onAppear(perform: reload)
+        .onReceive(NotificationCenter.default.publisher(for: V73LedgerStore.didChange)) { _ in reload() }
+        .sheet(isPresented: $showEditor) {
+            NavigationStack {
+                V73ProgramEditor { plan in
+                    var next = ledger
+                    next.plans.append(plan)
+                    do {
+                        try V73LedgerStore.persist(next)
+                        ledger = next
+                        return true
+                    } catch {
+                        message = error.localizedDescription
+                        return false
+                    }
+                }
+            }
+        }
+        .fileImporter(isPresented: $showImporter, allowedContentTypes: [.json], allowsMultipleSelection: false) { result in
+            do {
+                let urls = try result.get()
+                guard let url = urls.first else { return }
+                let merged = try V73LedgerStore.importBackup(url, into: ledger)
+                try V73LedgerStore.persist(merged)
+                ledger = merged
+                fileToShare = nil
+                message = "Sauvegarde des programmes importée sans écraser les programmes existants."
+            } catch { message = error.localizedDescription }
+        }
+        .alert("Eternal Forge", isPresented: Binding(get: { message != nil },
+                                                     set: { if !$0 { message = nil } })) {
+            Button("OK") { message = nil }
+        } message: { Text(message ?? "") }
+    }
+
+    private func reload() {
+        do { ledger = try V73LedgerStore.load(); canEdit = true }
+        catch { message = error.localizedDescription; canEdit = false }
+    }
+}
+
+private struct V73PlanRow: View {
+    @EnvironmentObject private var journal: BiluxStore
+    let plan: V73TrainingPlan
+    let ledger: V73Ledger
+    let workouts: [WorkoutSession]
+    private var progress: V73CampaignProgress {
+        V73CampaignEngine.progress(plan: plan, ledger: ledger, workouts: workouts)
+    }
+    private var hasCrown: Bool {
+        max(progress.counted, ledger.highestRelicThreshold[plan.id] ?? 0) >= 12
+    }
+    var body: some View {
+        NavigationLink {
+            V73ProgramDetail(planID: plan.id).environmentObject(journal)
+        } label: {
+            VStack(alignment: .leading, spacing: 9) {
+                HStack {
+                    Text(plan.title).font(.headline.weight(.heavy)).foregroundStyle(Nuclear.paleGold)
+                        .lineLimit(2)
+                    Spacer(minLength: 3)
+                    Image(systemName: "chevron.right").foregroundStyle(Nuclear.gold)
+                }
+                HStack {
+                    Label("\(plan.days.count) journées", systemImage: "calendar")
+                    Spacer()
+                    Text("Campagne \(progress.counted)/12")
+                }.font(.caption).foregroundStyle(Nuclear.muted)
+                ProgressView(value: progress.fraction).tint(Nuclear.purple)
+                if hasCrown {
+                    Label("COURONNE DU NÉANT DÉBLOQUÉE", systemImage: "crown.fill")
+                        .font(.caption.bold()).foregroundStyle(Nuclear.gold)
+                }
+            }
+            .padding(13)
+            .background(Nuclear.panel, in: RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct V73ProgramEditor: View {
+    @Environment(\.dismiss) private var dismiss
+    let onSave: (V73TrainingPlan) -> Bool
+    @State private var name = ""
+    @State private var dayName = "Séance A"
+    @State private var group = "Haut du corps"
+    @State private var duration = "60"
+    @State private var exerciseName = ""
+    @State private var sets = 3
+    @State private var reps = 10
+    @State private var weight = "0"
+    @State private var exercises: [V73ExerciseTarget] = []
+    @State private var days: [V73PlannedDay] = []
+    @State private var warning: String?
+    private let groups = ["Haut du corps", "Bas du corps", "Full body", "Poussée", "Tirage", "Cardio / mobilité", "Libre"]
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 15) {
+                Text("CRÉER TON PROGRAMME")
+                    .font(.title2.weight(.black)).foregroundStyle(Nuclear.gold)
+                NuclearCard {
+                    TextField("Nom du programme (ex. Cycle Réacteur)", text: $name)
+                        .textInputAutocapitalization(.words)
+                    Text("Les journées sont flexibles : tu peux t'entraîner ou te reposer quand tu veux.")
+                        .font(.caption).foregroundStyle(Nuclear.muted)
+                }
+                SectionCaption(title: "Composer une journée")
+                NuclearCard {
+                    TextField("Nom de la journée", text: $dayName)
+                    Picker("Groupe musculaire", selection: $group) {
+                        ForEach(groups, id: \.self) { Text($0).tag($0) }
+                    }
+                    HStack {
+                        Text("Durée cible (min)")
+                        Spacer()
+                        TextField("60", text: $duration).keyboardType(.numberPad)
+                            .multilineTextAlignment(.trailing).frame(width: 62)
+                    }.font(.subheadline)
+                    Divider()
+                    TextField("Exercice (ex. développé couché)", text: $exerciseName)
+                    HStack {
+                        Stepper("Séries : \(sets)", value: $sets, in: 1...12)
+                        Stepper("Rép. : \(reps)", value: $reps, in: 1...100)
+                    }.font(.caption)
+                    HStack {
+                        Text("Charge cible (kg)").font(.caption)
+                        Spacer()
+                        TextField("0", text: $weight).keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing).frame(width: 72)
+                    }
+                    Button("+ AJOUTER CET EXERCICE") { addExercise() }
+                        .buttonStyle(.bordered).tint(Nuclear.purple)
+                        .disabled(exercises.count >= 12)
+                    ForEach(exercises) { target in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(target.name).font(.subheadline.bold())
+                                Text("\(target.sets) × \(target.reps) · \(BiluxFormat.number(target.weight, digits: 1)) kg")
+                                    .font(.caption2).foregroundStyle(Nuclear.muted)
+                            }
+                            Spacer()
+                            Button(role: .destructive) {
+                                exercises.removeAll { $0.id == target.id }
+                            } label: { Image(systemName: "minus.circle.fill") }
+                        }
+                    }
+                    Button {
+                        addDay()
+                    } label: {
+                        Label("VALIDER CETTE JOURNÉE", systemImage: "checkmark.circle.fill")
+                            .frame(maxWidth: .infinity, minHeight: 42)
+                    }
+                    .buttonStyle(.borderedProminent).tint(Nuclear.gold)
+                    .disabled(days.count >= 7)
+                }
+                if !days.isEmpty {
+                    SectionCaption(title: "Journées du programme")
+                    ForEach(days) { day in
+                        NuclearCard {
+                            HStack {
+                                Text(day.title).font(.subheadline.bold())
+                                Spacer()
+                                Button(role: .destructive) {
+                                    days.removeAll { $0.id == day.id }
+                                } label: { Image(systemName: "trash") }
+                            }
+                            Text("\(day.muscleGroup) · \(day.exercises.count) exercices · \(day.durationMinutes) min")
+                                .font(.caption).foregroundStyle(Nuclear.muted)
+                        }
+                    }
+                }
+                Button("ENREGISTRER LE PROGRAMME") { save() }
+                    .buttonStyle(.borderedProminent).tint(Nuclear.gold)
+                    .frame(maxWidth: .infinity, minHeight: 46)
+                    .disabled(days.isEmpty)
+                Text("Tes séances existantes ne sont pas modifiées. Tu pourras importer cette journée dans la Forge.")
+                    .font(.caption2).foregroundStyle(Nuclear.muted)
+            }.padding(15)
+        }
+        .navigationTitle("Programme")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Fermer") { dismiss() } } }
+        .modifier(PageBackground())
+        .alert("Vérifie le programme", isPresented: Binding(get: { warning != nil },
+            set: { if !$0 { warning = nil } })) {
+            Button("OK") { warning = nil }
+        } message: { Text(warning ?? "") }
+    }
+
+    private func addExercise() {
+        let trimmed = exerciseName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.count <= 80,
+              let load = Double(weight.replacingOccurrences(of: ",", with: ".")),
+              load.isFinite, (0...1000).contains(load) else {
+            warning = "Précise un exercice (80 caractères maximum) et une charge entre 0 et 1000 kg."
+            return
+        }
+        exercises.append(V73ExerciseTarget(name: trimmed, sets: sets, reps: reps, weight: load))
+        exerciseName = ""
+    }
+
+    private func addDay() {
+        let title = dayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty, title.count <= 80, !exercises.isEmpty,
+              let time = Int(duration), (10...240).contains(time) else {
+            warning = "Nom de journée, au moins un exercice et durée entre 10 et 240 minutes requis."
+            return
+        }
+        days.append(V73PlannedDay(title: title, muscleGroup: group,
+                                 durationMinutes: time, exercises: exercises))
+        exercises = []
+        dayName = "Séance \(days.count + 1)"
+        exerciseName = ""
+    }
+
+    private func save() {
+        let title = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty, title.count <= 80, !days.isEmpty else {
+            warning = "Indique un nom de programme (80 caractères maximum) et une journée au minimum."
+            return
+        }
+        if onSave(V73TrainingPlan(title: title, createdAt: .now, days: days)) { dismiss() }
+        else { warning = "Impossible de sauvegarder le programme. Réessaie après vérification du stockage." }
+    }
+}
+
+private struct V73ProgramDetail: View {
+    @EnvironmentObject private var journal: BiluxStore
+    let planID: UUID
+    @State private var ledger = V73Ledger()
+    @State private var errorText: String?
+    @State private var showVictory = false
+
+    private var plan: V73TrainingPlan? { ledger.plans.first { $0.id == planID } }
+    private var progress: V73CampaignProgress? {
+        guard let plan else { return nil }
+        return V73CampaignEngine.progress(plan: plan, ledger: ledger, workouts: journal.data.workouts)
+    }
+    private var historicRelics: [String] {
+        let counted = max(progress?.counted ?? 0, ledger.highestRelicThreshold[planID] ?? 0)
+        var items: [String] = []
+        if counted >= 4 { items.append("Sceau de la Brèche") }
+        if counted >= 8 { items.append("Aura des Cendres") }
+        if counted >= 12 { items.append("Couronne du Néant") }
+        return items
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                if let plan, let progress {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(plan.title).font(.title2.weight(.black)).foregroundStyle(Nuclear.paleGold)
+                        Text("\(plan.days.count) journées · programme flexible")
+                            .font(.caption).foregroundStyle(Nuclear.muted)
+                    }
+                    V73BossPanel(progress: progress)
+                    SectionCaption(title: "Tes journées de Forge")
+                    ForEach(plan.days) { day in
+                        NuclearCard {
+                            Text(day.title).font(.headline.bold()).foregroundStyle(Nuclear.gold)
+                            Text("\(day.muscleGroup) · \(day.durationMinutes) min visés")
+                                .font(.caption).foregroundStyle(Nuclear.muted)
+                            ForEach(day.exercises) { exercise in
+                                HStack {
+                                    Text(exercise.name)
+                                        .font(.subheadline).lineLimit(2)
+                                    Spacer(minLength: 3)
+                                    Text("\(exercise.sets)×\(exercise.reps) · \(BiluxFormat.number(exercise.weight, digits: 1)) kg")
+                                        .font(.caption2).foregroundStyle(Nuclear.paleGold)
+                                }
+                            }
+                            NavigationLink {
+                                V70NuclearForge(launch: V73ForgeLaunch(
+                                    planID: plan.id, dayID: day.id,
+                                    planName: plan.title, day: day))
+                                    .environmentObject(journal)
+                            } label: {
+                                Label("DÉMARRER DANS LA FORGE", systemImage: "dumbbell.fill")
+                                    .frame(maxWidth: .infinity, minHeight: 40)
+                            }
+                            .buttonStyle(.borderedProminent).tint(Nuclear.gold)
+                            .disabled(plan.archived)
+                            let recorded = linkedForDay(day.id, plan: plan)
+                            if !recorded.isEmpty {
+                                Text("\(recorded.count) séance(s) reliée(s) au programme")
+                                    .font(.caption2).foregroundStyle(Nuclear.purple)
+                                if let recent = recorded.last {
+                                    Text("Dernière : \(BiluxFormat.day(recent.date)) · \(recent.durationMinutes) min")
+                                        .font(.caption2).foregroundStyle(Nuclear.muted)
+                                }
+                            }
+                        }
+                    }
+                    SectionCaption(title: "Récompenses cosmétiques")
+                    NuclearCard {
+                        ForEach(["Sceau de la Brèche", "Aura des Cendres", "Couronne du Néant"], id: \.self) { title in
+                            HStack {
+                                Image(systemName: historicRelics.contains(title) ? "checkmark.seal.fill" : "lock.fill")
+                                    .foregroundStyle(historicRelics.contains(title) ? Nuclear.gold : Nuclear.muted)
+                                Text(title).font(.subheadline)
+                                Spacer()
+                                Text(historicRelics.contains(title) ? "ACQUIS" : "VERROUILLÉ")
+                                    .font(.caption2).foregroundStyle(Nuclear.muted)
+                            }
+                        }
+                        if historicRelics.contains("Couronne du Néant") {
+                            Button("REVOIR LA CINÉMATIQUE DE VICTOIRE") { showVictory = true }
+                                .font(.caption.bold()).tint(Nuclear.gold)
+                        }
+                    }
+                    if let date = ledger.firstVictoryDates[planID] ?? progress.victoryDate {
+                        NuclearCard {
+                            Label("NÉANT VAINCU", systemImage: "crown.fill")
+                                .font(.headline.weight(.black)).foregroundStyle(Nuclear.gold)
+                            Text("Victoire du \(BiluxFormat.day(date)) · 12 journées éligibles, sans XP supplémentaire.")
+                                .font(.caption).foregroundStyle(Nuclear.muted)
+                        }
+                    }
+                    Button(plan.archived ? "RÉACTIVER LE PROGRAMME" : "ARCHIVER LE PROGRAMME") {
+                        toggleArchive()
+                    }
+                    .font(.caption.bold()).tint(Nuclear.purple)
+                } else {
+                    Text("Programme introuvable. Les séances du journal n'ont pas été touchées.")
+                        .font(.subheadline).foregroundStyle(Nuclear.muted)
+                }
+            }.padding(15)
+        }
+        .navigationTitle("Campagne RPG")
+        .navigationBarTitleDisplayMode(.inline)
+        .modifier(PageBackground())
+        .onAppear(perform: refresh)
+        .onReceive(NotificationCenter.default.publisher(for: V73LedgerStore.didChange)) { _ in refresh() }
+        .sheet(isPresented: $showVictory) {
+            V73VictoryCinema().environmentObject(journal).presentationDragIndicator(.visible)
+        }
+        .alert("Programme", isPresented: Binding(get: { errorText != nil },
+            set: { if !$0 { errorText = nil } })) {
+            Button("OK") { errorText = nil }
+        } message: { Text(errorText ?? "") }
+    }
+
+    private func linkedForDay(_ dayID: UUID, plan: V73TrainingPlan) -> [WorkoutSession] {
+        var byID: [UUID: WorkoutSession] = [:]
+        for session in journal.data.workouts { byID[session.id] = session }
+        return ledger.linkedSessions.filter { $0.planID == plan.id && $0.dayID == dayID }
+            .compactMap { byID[$0.workoutID] }.sorted { $0.date < $1.date }
+    }
+
+    private func toggleArchive() {
+        var next = ledger
+        guard let index = next.plans.firstIndex(where: { $0.id == planID }) else { return }
+        next.plans[index].archived.toggle()
+        do { try V73LedgerStore.persist(next); ledger = next }
+        catch { errorText = error.localizedDescription }
+    }
+
+    private func refresh() {
+        do {
+            var next = try V73LedgerStore.load()
+            if let plan = next.plans.first(where: { $0.id == planID }) {
+                let state = V73CampaignEngine.progress(plan: plan, ledger: next,
+                                                       workouts: journal.data.workouts)
+                var shouldPersist = false
+                if state.counted > (next.highestRelicThreshold[planID] ?? 0) {
+                    next.highestRelicThreshold[planID] = state.counted
+                    shouldPersist = true
+                }
+                if state.defeated && next.firstVictoryDates[planID] == nil,
+                   let date = state.victoryDate {
+                    next.firstVictoryDates[planID] = date
+                    shouldPersist = true
+                }
+                if state.defeated && !next.celebratedPlanIDs.contains(planID) {
+                    next.celebratedPlanIDs.append(planID)
+                    shouldPersist = true
+                    showVictory = true
+                }
+                if shouldPersist { try V73LedgerStore.persist(next) }
+            }
+            ledger = next
+        } catch { errorText = error.localizedDescription }
+    }
+}
+
+private struct V73BossPanel: View {
+    let progress: V73CampaignProgress
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var body: some View {
+        NuclearCard {
+            HStack {
+                Image(systemName: progress.defeated ? "crown.fill" : "shield.lefthalf.filled")
+                    .font(.system(size: 32)).foregroundStyle(Nuclear.purple)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("LE RÉACTEUR DU NÉANT")
+                        .font(.headline.weight(.black)).foregroundStyle(Nuclear.paleGold)
+                    Text(progress.phase).font(.caption.bold()).foregroundStyle(Nuclear.gold)
+                }
+                Spacer(minLength: 0)
+            }
+            ProgressView(value: progress.fraction).tint(Nuclear.gold)
+            HStack {
+                Text("\(progress.counted)/12 journées éligibles")
+                Spacer()
+                Text("PV : \(progress.hitPoints)/1200")
+            }.font(.caption.bold()).foregroundStyle(Nuclear.muted)
+            Text("Quatre phases, 12 journées validées : une seule par jour, cinq au plus par semaine. Repos sans pénalité.")
+                .font(.caption2).foregroundStyle(Nuclear.muted)
+        }
+    }
+}
+
+private struct V73VictoryCinema: View {
+    @EnvironmentObject private var journal: BiluxStore
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage("bilux.effectsEnabled") private var effectsEnabled = true
+    var body: some View {
+        ZStack {
+            Nuclear.background.ignoresSafeArea()
+            TimelineView(.animation(minimumInterval: 1.0 / 16.0,
+                                    paused: reduceMotion || !effectsEnabled)) { context in
+                let t = context.date.timeIntervalSinceReferenceDate
+                let shine = reduceMotion || !effectsEnabled ? 0.4 : (sin(t * 1.2) + 1.0) / 2.0
+                Circle()
+                    .fill(RadialGradient(colors: [Nuclear.gold.opacity(0.30 + shine * 0.30),
+                                                  Nuclear.purple.opacity(0.14), .clear],
+                                         center: .center, startRadius: 10, endRadius: 210))
+                    .frame(width: 380, height: 380)
+            }
+            VStack(spacing: 22) {
+                Spacer()
+                Text("VICTOIRE LÉGENDAIRE")
+                    .font(.title2.weight(.black)).tracking(1.6).foregroundStyle(Nuclear.gold)
+                V72CoreSeal(stageIndex: journal.unlockedStageIndex,
+                               masteryTotal: V63MasterySnapshot.evaluate(journal.data).unlockedTotal)
+                    .frame(width: 185, height: 185)
+                Text("LE NÉANT S'INCLINE")
+                    .font(.title.weight(.black)).foregroundStyle(Nuclear.paleGold)
+                    .multilineTextAlignment(.center)
+                Text("COURONNE DU NÉANT ACQUISE")
+                    .font(.subheadline.weight(.heavy)).foregroundStyle(Nuclear.purple)
+                Text("Un exploit cosmétique lié à ton entraînement. Aucun XP supplémentaire.")
+                    .font(.caption).foregroundStyle(Nuclear.muted)
+                    .multilineTextAlignment(.center)
+                Spacer()
+                Button("REVENIR À LA FORGE") { dismiss() }
+                    .buttonStyle(.borderedProminent).tint(Nuclear.gold)
+            }
+            .padding(24)
+        }
+        .accessibilityIdentifier("bilux.v73.victory")
     }
 }
