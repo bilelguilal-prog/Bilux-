@@ -3774,9 +3774,10 @@ private struct V70PerformanceSnapshot {
         self.days = days
         self.endDate = now
         let today = calendar.startOfDay(for: now)
-        self.startDate = calendar.date(byAdding: .day, value: -(days - 1), to: today) ?? today
+        let periodStart = calendar.date(byAdding: .day, value: -(days - 1), to: today) ?? today
+        self.startDate = periodStart
         self.all = workouts
-        self.sessions = workouts.filter { $0.date >= startDate && $0.date <= now }
+        self.sessions = workouts.filter { $0.date >= periodStart && $0.date <= now }
     }
 
     var count: Int { sessions.count }
