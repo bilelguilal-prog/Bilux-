@@ -1148,6 +1148,7 @@ struct HomeScreen: View {
                             .background(Nuclear.gold.opacity(0.10), in: Circle())
                     }
                     heroPanel
+                    V70RebirthCommandDeck().environmentObject(journal)
                     Button { showImmersion = true } label: {
                         Label("CONTEMPLER MON PERSONNAGE", systemImage: "viewfinder")
                             .font(.subheadline.bold())
@@ -1470,6 +1471,7 @@ struct SportScreen: View {
                     }
                     Button { showNew = true } label: { Label("CRÉER UNE SÉANCE", systemImage: "plus.circle.fill").frame(maxWidth: .infinity) }
                         .buttonStyle(.borderedProminent).tint(Nuclear.gold)
+                    V70ForgeSportEntry().environmentObject(journal)
                     SectionCaption(title: "Historique")
                     if journal.data.workouts.isEmpty { NuclearCard { Text("Aucune séance. Enregistre ton premier entraînement libre.").foregroundStyle(.secondary) } }
                     ForEach(journal.data.workouts.sorted(by: { $0.date > $1.date })) { workout in
@@ -3719,5 +3721,599 @@ private struct V63NuclearMasteryView: View {
                     .font(.caption).foregroundStyle(Nuclear.muted)
             }
         }
+    }
+}
+
+// MARK: - BILUX V7.0 · NUCLEAR REBIRTH
+// Extension non destructive de l'interface. Lit le journal existant ;
+// seule la Forge utilise BiluxStore.add(WorkoutSession) pour enregistrer une séance.
+// Aucun calcul d'XP, aucune migration, aucun accès médical ni HealthKit ici.
+
+private enum V70RebirthStyle {
+    static let gold = Nuclear.gold
+    static let purple = Nuclear.purple
+    static let light = Nuclear.paleGold
+    static let secondary = Nuclear.muted
+    static let background = Nuclear.panel
+
+    static func weight(_ value: Double) -> String {
+        BiluxFormat.number(value, digits: 1)
+    }
+    static func name(_ raw: String) -> String {
+        raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "fr_FR"))
+    }
+}
+
+private struct V70TrainingRecord: Identifiable {
+    let exercise: String
+    let maxWeight: Double
+    let reps: Int
+    let date: Date
+    var id: String { V70RebirthStyle.name(exercise) }
+}
+
+private struct V70PeriodBucket: Identifiable {
+    let firstDay: Date
+    let label: String
+    let sessions: Int
+    let minutes: Int
+    let volume: Double
+    var id: Date { firstDay }
+}
+
+private struct V70PerformanceSnapshot {
+    let all: [WorkoutSession]
+    let sessions: [WorkoutSession]
+    let days: Int
+    let startDate: Date
+    let endDate: Date
+
+    init(_ workouts: [WorkoutSession], days: Int, now: Date = .now) {
+        let calendar = Calendar.current
+        self.days = days
+        self.endDate = now
+        let today = calendar.startOfDay(for: now)
+        self.startDate = calendar.date(byAdding: .day, value: -(days - 1), to: today) ?? today
+        self.all = workouts
+        self.sessions = workouts.filter { $0.date >= startDate && $0.date <= now }
+    }
+
+    var count: Int { sessions.count }
+    var totalMinutes: Int { sessions.reduce(0) { $0 + min(1440, max(0, $1.durationMinutes)) } }
+    var totalVolume: Double { sessions.reduce(0) { $0 + max(0, $1.volume.isFinite ? $1.volume : 0) } }
+    var trainedDays: Int { Set(sessions.map { Calendar.current.startOfDay(for: $0.date) }).count }
+    var strengthSessions: Int {
+        sessions.filter { item in
+            let activity = V70RebirthStyle.name(item.activity)
+            return activity.contains("musculation") || activity.contains("strength") || activity.contains("force") || activity.contains("poids")
+        }.count
+    }
+
+    var records: [V70TrainingRecord] {
+        var best: [String: V70TrainingRecord] = [:]
+        for session in all where session.date <= endDate {
+            for exercise in session.exercises {
+                let key = V70RebirthStyle.name(exercise.name)
+                guard !key.isEmpty else { continue }
+                for set in exercise.sets where set.weight.isFinite && set.weight > 0 && set.reps > 0 {
+                    if let current = best[key], current.maxWeight >= set.weight { continue }
+                    best[key] = .init(exercise: exercise.name, maxWeight: set.weight,
+                                      reps: set.reps, date: session.date)
+                }
+            }
+        }
+        return best.values.sorted { $0.maxWeight > $1.maxWeight }
+    }
+
+    // Cinq à neuf colonnes selon la période ; pas d'extrapolation de HealthKit.
+    var buckets: [V70PeriodBucket] {
+        let step = days == 7 ? 1 : (days == 30 ? 5 : 10)
+        let cal = Calendar.current
+        return stride(from: 0, to: days, by: step).map { offset in
+            let start = cal.date(byAdding: .day, value: offset, to: startDate) ?? startDate
+            let stop = cal.date(byAdding: .day, value: step, to: start) ?? endDate
+            let items = sessions.filter { $0.date >= start && $0.date < stop }
+            let label = days == 7
+                ? start.formatted(.dateTime.weekday(.abbreviated).locale(Locale(identifier: "fr_FR")))
+                : start.formatted(.dateTime.day().month(.abbreviated).locale(Locale(identifier: "fr_FR")))
+            return V70PeriodBucket(firstDay: start, label: label, sessions: items.count,
+                                  minutes: items.reduce(0) { $0 + max(0, $1.durationMinutes) },
+                                  volume: items.reduce(0) { $0 + max(0, $1.volume) })
+        }
+    }
+}
+
+private struct V70RebirthTile: View {
+    let title: String
+    let value: String
+    let symbol: String
+    let color: Color
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Label(title, systemImage: symbol)
+                .font(.system(size: 10, weight: .heavy))
+                .foregroundStyle(color)
+                .lineLimit(2)
+            Text(value)
+                .font(.system(size: 21, weight: .black, design: .rounded))
+                .foregroundStyle(.white)
+                .minimumScaleFactor(0.65)
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(13)
+        .background(Nuclear.panel, in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(color.opacity(0.34), lineWidth: 1))
+    }
+}
+
+// Carte QG insérée après le portrait cinématique existant, sans en changer les effets.
+private struct V70RebirthCommandDeck: View {
+    @EnvironmentObject private var journal: BiluxStore
+
+    private var week: V70PerformanceSnapshot {
+        V70PerformanceSnapshot(journal.data.workouts, days: 7)
+    }
+    private var month: V70PerformanceSnapshot {
+        V70PerformanceSnapshot(journal.data.workouts, days: 30)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("NUCLEAR REBIRTH · V7.0")
+                        .font(.caption2.weight(.black)).tracking(2).foregroundStyle(Nuclear.purple)
+                    Text("CENTRE DE COMMANDEMENT")
+                        .font(.headline.weight(.black)).foregroundStyle(Nuclear.paleGold)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: "atom")
+                    .font(.system(size: 24, weight: .medium)).foregroundStyle(Nuclear.gold)
+                    .accessibilityHidden(true)
+            }
+            HStack(spacing: 9) {
+                V70RebirthTile(title: "SÉANCES / 7 J", value: "\(week.count)",
+                               symbol: "dumbbell.fill", color: Nuclear.gold)
+                V70RebirthTile(title: "MINUTES / 7 J", value: "\(week.totalMinutes)",
+                               symbol: "clock.fill", color: Nuclear.purple)
+            }
+            HStack(spacing: 9) {
+                V70RebirthTile(title: "VOLUME / 30 J", value: BiluxFormat.number(month.totalVolume),
+                               symbol: "scalemass.fill", color: Nuclear.purple)
+                V70RebirthTile(title: "RECORDS", value: "\(month.records.count)",
+                               symbol: "trophy.fill", color: Nuclear.gold)
+            }
+            VStack(spacing: 10) {
+                NavigationLink {
+                    V70NuclearForge().environmentObject(journal)
+                } label: {
+                    Label("ENTRER DANS LA FORGE", systemImage: "hammer.fill")
+                        .font(.subheadline.weight(.heavy))
+                        .frame(maxWidth: .infinity, minHeight: 42)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Nuclear.gold)
+                .accessibilityIdentifier("bilux.v70.forge.home")
+
+                NavigationLink {
+                    V70NuclearAnalytics().environmentObject(journal)
+                } label: {
+                    Label("ANALYSES DU COMBATTANT", systemImage: "chart.xyaxis.line")
+                        .font(.subheadline.weight(.heavy))
+                        .frame(maxWidth: .infinity, minHeight: 42)
+                }
+                .buttonStyle(.bordered)
+                .tint(Nuclear.purple)
+                .accessibilityIdentifier("bilux.v70.analytics.home")
+            }
+            Text("Statistiques issues du journal de séances, sans score de santé ni XP ajouté.")
+                .font(.caption2).foregroundStyle(Nuclear.muted)
+        }
+        .padding(15)
+        .background {
+            RoundedRectangle(cornerRadius: 17)
+                .fill(LinearGradient(colors: [Nuclear.panel, Nuclear.background],
+                                     startPoint: .topLeading, endPoint: .bottomTrailing))
+        }
+        .overlay(RoundedRectangle(cornerRadius: 17)
+            .stroke(LinearGradient(colors: [Nuclear.gold.opacity(0.85), Nuclear.purple.opacity(0.6)],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.2))
+    }
+}
+
+private struct V70ForgeSportEntry: View {
+    @EnvironmentObject private var journal: BiluxStore
+    var body: some View {
+        NuclearCard {
+            Text("LA FORGE DU COMBATTANT · V7.0")
+                .font(.caption.bold()).tracking(1.3).foregroundStyle(Nuclear.gold)
+            Text("Construis une séance série par série, compare tes charges et retrouve tes records.")
+                .font(.caption).foregroundStyle(Nuclear.muted)
+            NavigationLink {
+                V70NuclearForge().environmentObject(journal)
+            } label: {
+                Label("SAISIR UNE SÉANCE DE MUSCULATION", systemImage: "dumbbell.fill")
+                    .font(.subheadline.bold()).frame(maxWidth: .infinity, minHeight: 42)
+            }
+            .buttonStyle(.borderedProminent).tint(Nuclear.gold)
+            NavigationLink {
+                V70NuclearAnalytics().environmentObject(journal)
+            } label: {
+                Label("VOIR LES STATISTIQUES", systemImage: "chart.bar.fill")
+                    .font(.subheadline.bold()).frame(maxWidth: .infinity, minHeight: 42)
+            }
+            .buttonStyle(.bordered).tint(Nuclear.purple)
+        }
+    }
+}
+
+private struct V70DraftSet: Identifiable {
+    var id: UUID = UUID()
+    var reps: String = "10"
+    var weight: String = "0"
+}
+
+private struct V70NuclearForge: View {
+    @EnvironmentObject private var journal: BiluxStore
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var sessionDate = Date()
+    @State private var duration = "60"
+    @State private var notes = ""
+    @State private var rpe: Int = 6
+    @State private var exerciseName = ""
+    @State private var draftSets: [V70DraftSet] = [V70DraftSet()]
+    @State private var prepared: [WorkoutExercise] = []
+    @State private var errorText: String?
+    @State private var saved = false
+    @State private var achievedRecords: [String] = []
+    @State private var restUntil: Date?
+
+    private var knownRecords: [String: Double] {
+        var result: [String: Double] = [:]
+        for workout in journal.data.workouts {
+            for exercise in workout.exercises {
+                let key = V70RebirthStyle.name(exercise.name)
+                for set in exercise.sets where set.weight.isFinite && set.weight > 0 && set.reps > 0 {
+                    result[key] = max(result[key] ?? 0, set.weight)
+                }
+            }
+        }
+        return result
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Label("NUCLEAR FORGE", systemImage: "hammer.fill")
+                        .font(.title2.weight(.black)).foregroundStyle(Nuclear.gold)
+                    Text("Une séance, plusieurs exercices, autant de séries que nécessaire.")
+                        .font(.caption).foregroundStyle(Nuclear.muted)
+                }
+                NuclearCard {
+                    DatePicker("Date", selection: $sessionDate, in: ...Date(), displayedComponents: .date)
+                    HStack {
+                        Text("Durée (min)").font(.subheadline)
+                        Spacer()
+                        TextField("60", text: $duration).keyboardType(.numberPad)
+                            .multilineTextAlignment(.trailing).frame(width: 64)
+                    }
+                    HStack {
+                        Text("Effort perçu").font(.subheadline)
+                        Spacer()
+                        Stepper("\(rpe)/10", value: $rpe, in: 1...10)
+                            .labelsHidden()
+                        Text("\(rpe)/10").foregroundStyle(Nuclear.gold)
+                            .font(.subheadline.monospacedDigit())
+                    }
+                    TextField("Notes de séance (facultatif)", text: $notes, axis: .vertical)
+                        .lineLimit(2...4)
+                }
+
+                if !prepared.isEmpty {
+                    SectionCaption(title: "Exercices préparés")
+                    ForEach(prepared) { exercise in
+                        NuclearCard {
+                            HStack {
+                                Text(exercise.name).font(.subheadline.bold())
+                                Spacer()
+                                Text("\(exercise.sets.count) séries")
+                                    .font(.caption).foregroundStyle(Nuclear.paleGold)
+                            }
+                            Text(exercise.sets.map {
+                                "\($0.reps) × \(V70RebirthStyle.weight($0.weight)) kg"
+                            }.joined(separator: " · "))
+                                .font(.caption2).foregroundStyle(Nuclear.muted)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Button("Retirer cet exercice", role: .destructive) {
+                                prepared.removeAll { $0.id == exercise.id }
+                            }.font(.caption)
+                        }
+                    }
+                }
+
+                if !saved {
+                    SectionCaption(title: "Exercice en cours")
+                    NuclearCard {
+                        TextField("Nom de l'exercice", text: $exerciseName)
+                            .textInputAutocapitalization(.words)
+                            .autocorrectionDisabled(false)
+                        if let old = knownRecords[V70RebirthStyle.name(exerciseName)] {
+                            Label("Charge max enregistrée : \(V70RebirthStyle.weight(old)) kg", systemImage: "trophy.fill")
+                                .font(.caption).foregroundStyle(Nuclear.gold)
+                        }
+                        ForEach($draftSets) { $set in
+                            HStack(spacing: 8) {
+                                Image(systemName: "circle.hexagongrid.fill")
+                                    .font(.caption).foregroundStyle(Nuclear.purple)
+                                TextField("Rép.", text: $set.reps)
+                                    .keyboardType(.numberPad)
+                                    .textFieldStyle(.roundedBorder)
+                                TextField("Charge kg", text: $set.weight)
+                                    .keyboardType(.decimalPad)
+                                    .textFieldStyle(.roundedBorder)
+                                if draftSets.count > 1 {
+                                    Button(role: .destructive) {
+                                        draftSets.removeAll { $0.id == set.id }
+                                    } label: { Image(systemName: "minus.circle.fill") }
+                                        .accessibilityLabel("Retirer la série")
+                                }
+                            }
+                        }
+                        HStack(spacing: 8) {
+                            Button {
+                                if draftSets.count < 12 { draftSets.append(V70DraftSet()) }
+                            } label: { Label("+ SÉRIE", systemImage: "plus.circle") }
+                                .disabled(draftSets.count >= 12)
+                            Spacer()
+                            Button("REPOS 90 S") { restUntil = Date().addingTimeInterval(90) }
+                        }
+                        .buttonStyle(.bordered).tint(Nuclear.purple)
+                        if let restUntil {
+                            TimelineView(.periodic(from: .now, by: 1)) { context in
+                                let seconds = max(0, Int(restUntil.timeIntervalSince(context.date).rounded(.up)))
+                                HStack {
+                                    Label("Repos indicatif : \(seconds) s", systemImage: "timer")
+                                        .font(.caption.bold()).foregroundStyle(Nuclear.paleGold)
+                                    Spacer()
+                                    Button("Arrêter") { self.restUntil = nil }.font(.caption)
+                                }
+                            }
+                        }
+                        Button {
+                            addPreparedExercise()
+                        } label: {
+                            Label("VALIDER CET EXERCICE", systemImage: "checkmark.circle.fill")
+                                .frame(maxWidth: .infinity, minHeight: 40)
+                        }
+                        .buttonStyle(.bordered).tint(Nuclear.gold)
+                        .disabled(prepared.count >= 25)
+                    }
+                }
+
+                NuclearCard {
+                    if saved {
+                        Label("SÉANCE ENREGISTRÉE", systemImage: "checkmark.seal.fill")
+                            .font(.headline).foregroundStyle(Nuclear.gold)
+                        if !achievedRecords.isEmpty {
+                            Label("RECORD BRISÉ ⚡", systemImage: "bolt.fill")
+                                .font(.title3.weight(.black)).foregroundStyle(Nuclear.purple)
+                            ForEach(achievedRecords, id: \.self) { item in
+                                Text(item).font(.subheadline).foregroundStyle(Nuclear.paleGold)
+                            }
+                        }
+                        Button("RETOUR AU JOURNAL") { dismiss() }
+                            .frame(maxWidth: .infinity)
+                            .buttonStyle(.borderedProminent).tint(Nuclear.gold)
+                    } else {
+                        Button {
+                            saveSession()
+                        } label: {
+                            Label("ENREGISTRER LA SÉANCE", systemImage: "square.and.arrow.down.fill")
+                                .frame(maxWidth: .infinity, minHeight: 44)
+                        }
+                        .buttonStyle(.borderedProminent).tint(Nuclear.gold)
+                        Text("Une seule séance est ajoutée au journal. XP et quêtes restent calculés par BILUX.")
+                            .font(.caption2).foregroundStyle(Nuclear.muted)
+                    }
+                }
+            }
+            .padding(15)
+        }
+        .navigationTitle("La Forge")
+        .navigationBarTitleDisplayMode(.inline)
+        .modifier(PageBackground())
+        .alert("Vérifie la séance", isPresented: Binding(
+            get: { errorText != nil },
+            set: { if !$0 { errorText = nil } }
+        )) {
+            Button("OK") { errorText = nil }
+        } message: {
+            Text(errorText ?? "")
+        }
+    }
+
+    private func makeCurrentExercise() -> WorkoutExercise? {
+        let name = exerciseName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty, name.count <= 80, !draftSets.isEmpty else { return nil }
+        var sets: [WorkoutSet] = []
+        for draft in draftSets {
+            guard let reps = Int(draft.reps), (1...300).contains(reps),
+                  let weight = Double(draft.weight.replacingOccurrences(of: ",", with: ".")),
+                  weight.isFinite, (0...1000).contains(weight) else { return nil }
+            sets.append(WorkoutSet(reps: reps, weight: weight))
+        }
+        return WorkoutExercise(name: name, sets: sets)
+    }
+
+    private func addPreparedExercise() {
+        guard let exercise = makeCurrentExercise() else {
+            errorText = "Indique un nom d'exercice, des répétitions de 1 à 300 et une charge entre 0 et 1 000 kg."
+            return
+        }
+        prepared.append(exercise)
+        exerciseName = ""
+        draftSets = [V70DraftSet()]
+        restUntil = nil
+    }
+
+    private func saveSession() {
+        guard !saved else { return }
+        guard let minutes = Int(duration), (1...1440).contains(minutes) else {
+            errorText = "La durée doit être comprise entre 1 et 1 440 minutes."
+            return
+        }
+        var exercises = prepared
+        if !exerciseName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            guard let current = makeCurrentExercise() else {
+                errorText = "L'exercice en cours comporte une série ou une charge invalide."
+                return
+            }
+            exercises.append(current)
+        }
+        guard !exercises.isEmpty, exercises.count <= 25 else {
+            errorText = "Ajoute au moins un exercice avant d'enregistrer la séance."
+            return
+        }
+        let previous = knownRecords
+        var newRecords: [String] = []
+        for exercise in exercises {
+            let bestWeight = exercise.sets.map(\.weight).max() ?? 0
+            let old = previous[V70RebirthStyle.name(exercise.name)] ?? 0
+            if bestWeight > 0 && bestWeight > old {
+                newRecords.append("\(exercise.name) · \(V70RebirthStyle.weight(bestWeight)) kg")
+            }
+        }
+        journal.add(WorkoutSession(date: sessionDate, activity: "Musculation",
+                                   durationMinutes: minutes, notes: notes, rpe: rpe,
+                                   exercises: exercises))
+        achievedRecords = Array(Set(newRecords)).sorted()
+        saved = true
+    }
+}
+
+private struct V70NuclearAnalytics: View {
+    @EnvironmentObject private var journal: BiluxStore
+    @State private var period = 30
+    private var data: V70PerformanceSnapshot {
+        V70PerformanceSnapshot(journal.data.workouts, days: period)
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 15) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("NUCLEAR ANALYTICS · V7.0")
+                            .font(.caption2.bold()).tracking(1.5).foregroundStyle(Nuclear.purple)
+                        Text("STATISTIQUES DU COMBATTANT")
+                            .font(.title3.weight(.black)).foregroundStyle(Nuclear.paleGold)
+                    }
+                    Spacer(minLength: 6)
+                    Image(systemName: "chart.xyaxis.line")
+                        .font(.title2).foregroundStyle(Nuclear.gold)
+                }
+                Picker("Période", selection: $period) {
+                    Text("7 jours").tag(7)
+                    Text("30 jours").tag(30)
+                    Text("90 jours").tag(90)
+                }
+                .pickerStyle(.segmented)
+
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 9) {
+                    V70RebirthTile(title: "SÉANCES", value: "\(data.count)",
+                                   symbol: "dumbbell.fill", color: Nuclear.gold)
+                    V70RebirthTile(title: "MINUTES", value: "\(data.totalMinutes)",
+                                   symbol: "clock.fill", color: Nuclear.purple)
+                    V70RebirthTile(title: "VOLUME*", value: "\(BiluxFormat.number(data.totalVolume))",
+                                   symbol: "scalemass.fill", color: Nuclear.purple)
+                    V70RebirthTile(title: "JOURS ACTIFS", value: "\(data.trainedDays)",
+                                   symbol: "calendar", color: Nuclear.gold)
+                }
+
+                NuclearCard {
+                    SectionCaption(title: "Rythme d'entraînement")
+                    let buckets = data.buckets
+                    let maxCount = max(1, buckets.map(\.sessions).max() ?? 0)
+                    HStack(alignment: .bottom, spacing: 6) {
+                        ForEach(buckets) { bucket in
+                            VStack(spacing: 4) {
+                                Text("\(bucket.sessions)")
+                                    .font(.system(size: 10, weight: .bold, design: .rounded))
+                                    .foregroundStyle(Nuclear.paleGold)
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(bucket.sessions == 0 ? Nuclear.purple.opacity(0.15) : Nuclear.gold)
+                                    .frame(height: CGFloat(max(5.0, 85.0 * Double(bucket.sessions) / Double(maxCount))))
+                                    .frame(maxHeight: .infinity, alignment: .bottom)
+                                Text(bucket.label)
+                                    .font(.system(size: period == 7 ? 10 : 8, weight: .medium))
+                                    .foregroundStyle(Nuclear.muted)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.7)
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                    }
+                    .frame(height: 122)
+                    Text("Nombre de séances consignées par période, sans estimation des séances non enregistrées.")
+                        .font(.caption2).foregroundStyle(Nuclear.muted)
+                }
+
+                NuclearCard {
+                    SectionCaption(title: "Bilan du réacteur")
+                    HStack {
+                        Label("Musculation", systemImage: "bolt.shield.fill")
+                        Spacer()
+                        Text("\(data.strengthSessions) séances").foregroundStyle(Nuclear.gold)
+                    }
+                    HStack {
+                        Label("Durée moyenne", systemImage: "clock")
+                        Spacer()
+                        Text(data.count == 0 ? "—" : "\(data.totalMinutes / data.count) min")
+                            .foregroundStyle(Nuclear.gold)
+                    }
+                    HStack {
+                        Label("Charge cumulée*", systemImage: "sum")
+                        Spacer()
+                        Text("\(BiluxFormat.number(data.totalVolume)) kg·rép")
+                            .foregroundStyle(Nuclear.gold)
+                    }
+                    Text("* Volume = répétitions × charge déclarée, pour les exercices saisis ; les séances Watch sans séries détaillées ne contribuent pas au volume.")
+                        .font(.caption2).foregroundStyle(Nuclear.muted)
+                }
+
+                NuclearCard {
+                    SectionCaption(title: "Records · historique complet")
+                    if data.records.isEmpty {
+                        Text("Aucune charge saisie pour le moment. La Forge permet d'enregistrer tes séries.")
+                            .font(.caption).foregroundStyle(Nuclear.muted)
+                    } else {
+                        ForEach(Array(data.records.prefix(10))) { record in
+                            HStack(alignment: .top, spacing: 8) {
+                                Image(systemName: "trophy.fill").foregroundStyle(Nuclear.gold)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(record.exercise).font(.subheadline.weight(.semibold))
+                                    Text("\(record.reps) répétition(s) · \(BiluxFormat.day(record.date))")
+                                        .font(.caption2).foregroundStyle(Nuclear.muted)
+                                }
+                                Spacer(minLength: 4)
+                                Text("\(V70RebirthStyle.weight(record.maxWeight)) kg")
+                                    .font(.subheadline.weight(.heavy)).foregroundStyle(Nuclear.paleGold)
+                            }
+                        }
+                    }
+                    Text("Records de charges déclarées, pas des mesures médicales ni une estimation de force maximale.")
+                        .font(.caption2).foregroundStyle(Nuclear.muted)
+                }
+            }
+            .padding(15)
+        }
+        .navigationTitle("Nuclear Analytics")
+        .navigationBarTitleDisplayMode(.inline)
+        .modifier(PageBackground())
+        .accessibilityIdentifier("bilux.v70.analytics")
     }
 }
