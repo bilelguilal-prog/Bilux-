@@ -3908,6 +3908,24 @@ private struct V70RebirthCommandDeck: View {
                 .buttonStyle(.bordered)
                 .tint(Nuclear.purple)
                 .accessibilityIdentifier("bilux.v70.analytics.home")
+
+                NavigationLink {
+                    V71ExercisePerformance().environmentObject(journal)
+                } label: {
+                    Label("PROGRESSION PAR EXERCICE", systemImage: "chart.line.uptrend.xyaxis")
+                        .font(.subheadline.weight(.heavy))
+                        .frame(maxWidth: .infinity, minHeight: 42)
+                }
+                .buttonStyle(.bordered).tint(Nuclear.gold)
+
+                NavigationLink {
+                    V71AscensionChronicleView().environmentObject(journal)
+                } label: {
+                    Label("JOURNAL DE L'ASCENSION", systemImage: "book.closed.fill")
+                        .font(.subheadline.weight(.heavy))
+                        .frame(maxWidth: .infinity, minHeight: 42)
+                }
+                .buttonStyle(.bordered).tint(Nuclear.purple)
             }
             Text("Statistiques issues du journal de séances, sans score de santé ni XP ajouté.")
                 .font(.caption2).foregroundStyle(Nuclear.muted)
@@ -3946,6 +3964,18 @@ private struct V70ForgeSportEntry: View {
                     .font(.subheadline.bold()).frame(maxWidth: .infinity, minHeight: 42)
             }
             .buttonStyle(.bordered).tint(Nuclear.purple)
+            NavigationLink {
+                V71ExercisePerformance().environmentObject(journal)
+            } label: {
+                Label("PROGRESSION PAR EXERCICE", systemImage: "chart.line.uptrend.xyaxis")
+                    .font(.subheadline.bold()).frame(maxWidth: .infinity, minHeight: 42)
+            }.buttonStyle(.bordered).tint(Nuclear.gold)
+            NavigationLink {
+                V71AscensionChronicleView().environmentObject(journal)
+            } label: {
+                Label("JOURNAL DE L'ASCENSION", systemImage: "book.closed.fill")
+                    .font(.subheadline.bold()).frame(maxWidth: .infinity, minHeight: 42)
+            }.buttonStyle(.bordered).tint(Nuclear.purple)
         }
     }
 }
@@ -3970,6 +4000,7 @@ private struct V70NuclearForge: View {
     @State private var errorText: String?
     @State private var saved = false
     @State private var achievedRecords: [String] = []
+    @State private var showRecordCelebration = false
     @State private var restUntil: Date?
 
     private var knownRecords: [String: Double] {
@@ -4125,6 +4156,9 @@ private struct V70NuclearForge: View {
             .padding(15)
         }
         .navigationTitle("La Forge")
+        .sheet(isPresented: $showRecordCelebration) {
+            V71RecordCelebration(records: achievedRecords)
+        }
         .navigationBarTitleDisplayMode(.inline)
         .modifier(PageBackground())
         .alert("Vérifie la séance", isPresented: Binding(
@@ -4193,6 +4227,7 @@ private struct V70NuclearForge: View {
                                    exercises: exercises))
         achievedRecords = Array(Set(newRecords)).sorted()
         saved = true
+        showRecordCelebration = !achievedRecords.isEmpty
     }
 }
 
@@ -4316,5 +4351,488 @@ private struct V70NuclearAnalytics: View {
         .navigationBarTitleDisplayMode(.inline)
         .modifier(PageBackground())
         .accessibilityIdentifier("bilux.v70.analytics")
+    }
+}
+
+// MARK: - BILUX V7.1 · NUCLEAR PERFORMANCE
+// Lecture seule du journal V7.0, aucune écriture dans les XP ni les sauvegardes.
+private enum V71Metric: String, CaseIterable, Identifiable {
+    case weight = "Charge"
+    case reps = "Répétitions"
+    case volume = "Volume"
+    var id: String { rawValue }
+    var symbol: String {
+        switch self {
+        case .weight: return "scalemass.fill"
+        case .reps: return "repeat"
+        case .volume: return "chart.bar.fill"
+        }
+    }
+    var unit: String { self == .weight ? "kg" : self == .reps ? "rép." : "kg·rép" }
+}
+
+private struct V71WorkoutPoint: Identifiable {
+    let sessionID: UUID
+    let date: Date
+    let maxWeight: Double
+    let totalReps: Int
+    let volume: Double
+    let validSets: Int
+    var id: UUID { sessionID }
+    func value(_ metric: V71Metric) -> Double {
+        switch metric {
+        case .weight: return maxWeight
+        case .reps: return Double(totalReps)
+        case .volume: return volume
+        }
+    }
+}
+
+private struct V71ExerciseTrend: Identifiable {
+    let key: String
+    let title: String
+    let points: [V71WorkoutPoint]
+    var id: String { key }
+    var latest: V71WorkoutPoint? { points.last }
+    var previous: V71WorkoutPoint? { points.count >= 2 ? points[points.count - 2] : nil }
+    var personalBest: Double { points.map(\.maxWeight).max() ?? 0 }
+}
+
+private enum V71PerformanceEngine {
+    // Un point par séance et par exercice : doublons de nom fusionnés au sein d'une même séance.
+    static func trends(_ workouts: [WorkoutSession], now: Date = .now) -> [V71ExerciseTrend] {
+        var index: [String: (title: String, points: [V71WorkoutPoint])] = [:]
+        for session in workouts where session.date <= now {
+            var sessionExercises: [String: (title: String, sets: [WorkoutSet])] = [:]
+            for exercise in session.exercises {
+                let title = exercise.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                let key = V70RebirthStyle.name(title)
+                guard !key.isEmpty else { continue }
+                let valid = exercise.sets.filter {
+                    $0.weight.isFinite && (0...1000).contains($0.weight) && (1...300).contains($0.reps)
+                }
+                guard !valid.isEmpty else { continue }
+                if sessionExercises[key] == nil { sessionExercises[key] = (title, []) }
+                sessionExercises[key]?.sets.append(contentsOf: valid)
+            }
+            for (key, entry) in sessionExercises {
+                let point = V71WorkoutPoint(
+                    sessionID: session.id, date: session.date,
+                    maxWeight: entry.sets.map(\.weight).max() ?? 0,
+                    totalReps: entry.sets.reduce(0) { $0 + $1.reps },
+                    volume: entry.sets.reduce(0) { $0 + Double($1.reps) * $1.weight },
+                    validSets: entry.sets.count
+                )
+                if index[key] == nil { index[key] = (entry.title, []) }
+                index[key]?.points.append(point)
+            }
+        }
+        return index.map { key, item in
+            V71ExerciseTrend(key: key, title: item.title,
+                             points: item.points.sorted {
+                if $0.date != $1.date { return $0.date < $1.date }
+                return $0.sessionID.uuidString < $1.sessionID.uuidString
+            })
+        }.sorted { $0.title.localizedStandardCompare($1.title) == .orderedAscending }
+    }
+}
+
+private struct V71MetricComparison: View {
+    let title: String
+    let current: Double
+    let previous: Double?
+    let unit: String
+
+    private var change: Double? { previous.map { current - $0 } }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title.uppercased())
+                .font(.system(size: 10, weight: .heavy)).foregroundStyle(Nuclear.muted)
+            Text("\(BiluxFormat.number(current, digits: unit == "kg" ? 1 : 0)) \(unit)")
+                .font(.headline.monospacedDigit()).foregroundStyle(Nuclear.paleGold)
+                .minimumScaleFactor(0.7).lineLimit(1)
+            if let change {
+                Text("\(change > 0 ? "+" : "")\(BiluxFormat.number(change, digits: unit == "kg" ? 1 : 0)) depuis la précédente")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(change > 0 ? Nuclear.gold : change < 0 ? Nuclear.purple : Nuclear.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("Première séance connue").font(.caption2).foregroundStyle(Nuclear.muted)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+private struct V71TrendBars: View {
+    let points: [V71WorkoutPoint]
+    let metric: V71Metric
+
+    var body: some View {
+        let values = Array(points.suffix(8))
+        let maximum = max(1.0, values.map { $0.value(metric) }.max() ?? 1)
+        HStack(alignment: .bottom, spacing: 5) {
+            ForEach(values) { point in
+                VStack(spacing: 5) {
+                    Text(BiluxFormat.number(point.value(metric), digits: metric == .weight ? 1 : 0))
+                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                        .foregroundStyle(Nuclear.paleGold)
+                        .lineLimit(1).minimumScaleFactor(0.65)
+                    RoundedRectangle(cornerRadius: 5)
+                        .fill(LinearGradient(colors: [Nuclear.gold, Nuclear.purple],
+                                             startPoint: .top, endPoint: .bottom))
+                        .frame(height: CGFloat(max(4, 90 * point.value(metric) / maximum)))
+                        .frame(maxHeight: .infinity, alignment: .bottom)
+                    Text(point.date.formatted(.dateTime.day().month(.twoDigits)))
+                        .font(.system(size: 8, weight: .medium))
+                        .foregroundStyle(Nuclear.muted)
+                        .lineLimit(1).minimumScaleFactor(0.7)
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .frame(height: 133)
+        .accessibilityLabel("Historique des huit dernières séances : \(values.map { BiluxFormat.number($0.value(metric)) }.joined(separator: ", ")) \(metric.unit)")
+    }
+}
+
+private struct V71ExercisePerformance: View {
+    @EnvironmentObject private var journal: BiluxStore
+    @State private var selectedKey = ""
+    @State private var period = 90
+    @State private var metric: V71Metric = .weight
+
+    private var trends: [V71ExerciseTrend] { V71PerformanceEngine.trends(journal.data.workouts) }
+    private var activeKey: String {
+        trends.contains(where: { $0.key == selectedKey }) ? selectedKey : (trends.first?.key ?? "")
+    }
+    private var current: V71ExerciseTrend? { trends.first { $0.key == activeKey } }
+
+    private var filtered: [V71WorkoutPoint] {
+        guard let current else { return [] }
+        guard period > 0, let cutoff = Calendar.current.date(byAdding: .day, value: -period, to: .now) else {
+            return current.points
+        }
+        return current.points.filter { $0.date >= cutoff }
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("NUCLEAR PERFORMANCE · V7.1")
+                        .font(.caption2.bold()).tracking(1.3).foregroundStyle(Nuclear.purple)
+                    Text("PROGRESSION PAR EXERCICE")
+                        .font(.title3.weight(.black)).foregroundStyle(Nuclear.paleGold)
+                }
+                if trends.isEmpty {
+                    NuclearCard {
+                        Label("Aucune série enregistrée", systemImage: "dumbbell.fill")
+                        Text("Consigne une séance avec des répétitions et des charges dans la Forge pour voir ta progression.")
+                            .font(.caption).foregroundStyle(Nuclear.muted)
+                    }
+                } else if let current {
+                    NuclearCard {
+                        Picker("Exercice", selection: Binding(
+                            get: { activeKey }, set: { selectedKey = $0 }
+                        )) {
+                            ForEach(trends) { exercise in
+                                Text(exercise.title).tag(exercise.key)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        Picker("Mesure", selection: $metric) {
+                            ForEach(V71Metric.allCases) { option in
+                                Text(option.rawValue).tag(option)
+                            }
+                        }.pickerStyle(.segmented)
+                        Picker("Période", selection: $period) {
+                            Text("30 j").tag(30)
+                            Text("90 j").tag(90)
+                            Text("1 an").tag(365)
+                            Text("Tout").tag(0)
+                        }.pickerStyle(.segmented)
+                    }
+                    NuclearCard {
+                        SectionCaption(title: "Courbe du réacteur")
+                        if filtered.isEmpty {
+                            Text("Aucune séance sur cette période.").font(.caption).foregroundStyle(Nuclear.muted)
+                        } else {
+                            V71TrendBars(points: filtered, metric: metric)
+                            Text("\(filtered.count) séance(s) · dernières huit représentées · \(metric.unit)")
+                                .font(.caption2).foregroundStyle(Nuclear.muted)
+                        }
+                    }
+                    NuclearCard {
+                        SectionCaption(title: "Cette séance contre la précédente")
+                        if let latest = current.latest {
+                            Text("Dernière : \(BiluxFormat.day(latest.date))")
+                                .font(.caption).foregroundStyle(Nuclear.muted)
+                            HStack(alignment: .top, spacing: 12) {
+                                V71MetricComparison(title: "Charge max", current: latest.maxWeight,
+                                    previous: current.previous?.maxWeight, unit: "kg")
+                                V71MetricComparison(title: "Rép. totales", current: Double(latest.totalReps),
+                                    previous: current.previous.map { Double($0.totalReps) }, unit: "rép.")
+                            }
+                            Divider()
+                            V71MetricComparison(title: "Volume de l'exercice", current: latest.volume,
+                                previous: current.previous?.volume, unit: "kg·rép")
+                            Text("Comparaison des deux dernières séances consignées pour cet exercice, quel que soit le filtre de dates.")
+                                .font(.caption2).foregroundStyle(Nuclear.muted)
+                        }
+                    }
+                    NuclearCard {
+                        SectionCaption(title: "Meilleure charge déclarée")
+                        HStack {
+                            Image(systemName: "trophy.fill").foregroundStyle(Nuclear.gold)
+                            Text("\(V70RebirthStyle.weight(current.personalBest)) kg")
+                                .font(.title2.weight(.heavy)).foregroundStyle(Nuclear.paleGold)
+                            Spacer()
+                            Text("\(current.points.count) séances")
+                                .font(.caption2).foregroundStyle(Nuclear.muted)
+                        }
+                        Text("Une charge plus faible sur une séance de récupération n'est pas une régression physique. Ces graphiques décrivent seulement les séries consignées.")
+                            .font(.caption2).foregroundStyle(Nuclear.muted)
+                    }
+                }
+            }.padding(15)
+        }
+        .navigationTitle("Nuclear Performance")
+        .navigationBarTitleDisplayMode(.inline)
+        .modifier(PageBackground())
+        .accessibilityIdentifier("bilux.v71.performance")
+    }
+}
+
+private struct V71AscensionEvent: Identifiable {
+    enum Kind { case record, milestone, boss, transformation }
+    let id: String
+    let date: Date
+    let kind: Kind
+    let title: String
+    let detail: String
+    let symbol: String
+}
+
+private enum V71AscensionChronicle {
+    static func events(_ data: BiluxData, now: Date = .now) -> [V71AscensionEvent] {
+        let cal = Calendar.current
+        let ordered = data.workouts.filter { $0.date <= now }.sorted {
+            if $0.date != $1.date { return $0.date < $1.date }
+            return $0.id.uuidString < $1.id.uuidString
+        }
+        var result: [V71AscensionEvent] = []
+        var previousBest: [String: Double] = [:]
+        for (index, workout) in ordered.enumerated() {
+            if [0, 9, 24, 49, 99].contains(index) {
+                let count = index + 1
+                result.append(.init(id: "session-\(workout.id.uuidString)", date: workout.date,
+                    kind: .milestone,
+                    title: count == 1 ? "PREMIER COMBAT" : "\(count) SÉANCES CONSIGNÉES",
+                    detail: "Jalon du journal sportif · sans XP supplémentaire", symbol: "flag.checkered"))
+            }
+            var sessionBest: [String: (title: String, weight: Double)] = [:]
+            for exercise in workout.exercises {
+                let title = exercise.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                let key = V70RebirthStyle.name(title)
+                guard !key.isEmpty else { continue }
+                let best = exercise.sets.filter { $0.weight.isFinite && $0.weight > 0 && $0.reps > 0 }
+                    .map(\.weight).max() ?? 0
+                guard best > 0 else { continue }
+                if best > (sessionBest[key]?.weight ?? 0) { sessionBest[key] = (title, best) }
+            }
+            for (key, item) in sessionBest.sorted(by: { $0.key < $1.key }) {
+                if let old = previousBest[key], item.weight > old {
+                    result.append(.init(id: "record-\(workout.id.uuidString)-\(key)", date: workout.date,
+                        kind: .record, title: "RECORD BRISÉ ⚡",
+                        detail: "\(item.title) · \(V70RebirthStyle.weight(old)) → \(V70RebirthStyle.weight(item.weight)) kg",
+                        symbol: "trophy.fill"))
+                }
+                previousBest[key] = max(previousBest[key] ?? 0, item.weight)
+            }
+        }
+        // Les boss utilisent les mêmes journées éligibles que V5.5 : >=10 min,
+        // un jour distinct, jusqu'à cinq jours par semaine, après l'ancre de migration.
+        let anchor = data.longAscensionAnchor?.startedAt ?? now
+        let days = Set(ordered.filter { $0.date >= anchor && $0.durationMinutes >= 10 }
+            .map { cal.startOfDay(for: $0.date) })
+        let weekGroups = Dictionary(grouping: days, by: { day in
+            cal.dateInterval(of: .weekOfYear, for: day)?.start ?? day
+        })
+        let eligible = weekGroups.values.flatMap { $0.sorted().prefix(5) }.sorted()
+        var monthly: [Date: Int] = [:]
+        var quarterly: [Date: Int] = [:]
+        for day in eligible {
+            let month = cal.dateInterval(of: .month, for: day)?.start ?? day
+            let components = cal.dateComponents([.year, .month], from: day)
+            let quarterStartMonth = (((components.month ?? 1) - 1) / 3) * 3 + 1
+            let quarter = cal.date(from: DateComponents(year: components.year, month: quarterStartMonth, day: 1)) ?? day
+            monthly[month, default: 0] += 1
+            quarterly[quarter, default: 0] += 1
+            if monthly[month] == 12 {
+                result.append(.init(id: "guardian-\(month.timeIntervalSince1970)", date: day,
+                    kind: .boss, title: "GARDIEN DU RÉACTEUR VAINCU",
+                    detail: "12 journées éligibles sur un mois civil · victoire reconstituée",
+                    symbol: "shield.fill"))
+            }
+            if quarterly[quarter] == 30 {
+                result.append(.init(id: "sovereign-\(quarter.timeIntervalSince1970)", date: day,
+                    kind: .boss, title: "SOUVERAIN DU NÉANT VAINCU",
+                    detail: "30 journées éligibles sur un trimestre civil · victoire reconstituée",
+                    symbol: "crown.fill"))
+            }
+        }
+        // Dates de transformations : uniquement si le passage est traçable
+        // depuis l'ancre V5.5. Les rangs déjà acquis avant migration restent sans date.
+        let initialStage = data.longAscensionAnchor?.legacyStage ?? 0
+        var lastStage = initialStage
+        let activeDays = Set((ordered.map(\.date) + data.meals.map(\.date) + data.checkins.map(\.date))
+            .filter { $0 >= anchor && $0 <= now }.map { cal.startOfDay(for: $0) }).sorted()
+        for day in activeDays where lastStage < 4 {
+            guard let nextDay = cal.date(byAdding: .day, value: 1, to: day) else { continue }
+            let instant = min(now, nextDay.addingTimeInterval(-0.001))
+            let xp = BILUXV55Progression.totalXP(data, now: instant)
+            let level = BILUXV55Progression.level(for: xp,
+                floor: data.longAscensionAnchor?.legacyLevel ?? 1)
+            let stage = BILUXV55Progression.unlockedStage(level: level, legacyFloor: initialStage)
+            if stage > lastStage {
+                for newStage in (lastStage + 1)...min(stage, 4) {
+                    result.append(.init(id: "stage-\(newStage)", date: day,
+                        kind: .transformation,
+                        title: "ÉVEIL · \(BILUXV55Progression.stageNames[newStage])",
+                        detail: "Palier d'ascension atteint · date reconstituée depuis le journal",
+                        symbol: "bolt.shield.fill"))
+                }
+                lastStage = stage
+            }
+        }
+        return result.sorted {
+            if $0.date != $1.date { return $0.date > $1.date }
+            return $0.id < $1.id
+        }
+    }
+}
+
+private struct V71AscensionChronicleView: View {
+    @EnvironmentObject private var journal: BiluxStore
+    @State private var filter = 0
+    private var events: [V71AscensionEvent] { V71AscensionChronicle.events(journal.data) }
+    private var visible: [V71AscensionEvent] {
+        events.filter { item in
+            switch filter {
+            case 1: return item.kind == .record
+            case 2: return item.kind == .boss
+            case 3: return item.kind == .transformation
+            default: return true
+            }
+        }
+    }
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 15) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("LES CHRONIQUES DU NOYAU · V7.1")
+                        .font(.caption2.bold()).tracking(1.5).foregroundStyle(Nuclear.purple)
+                    Text("JOURNAL DE L'ASCENSION")
+                        .font(.title3.weight(.black)).foregroundStyle(Nuclear.paleGold)
+                }
+                NuclearCard {
+                    HStack {
+                        Image(systemName: "crown.fill").foregroundStyle(Nuclear.gold)
+                        Text("\(journal.rankName.uppercased()) · NIV. \(journal.heroLevel)")
+                            .font(.headline.weight(.bold)).foregroundStyle(Nuclear.paleGold)
+                    }
+                    Text("Rang actuel : les formes obtenues avant la migration V5.5 n'ont pas de date d'obtention fiable.")
+                        .font(.caption2).foregroundStyle(Nuclear.muted)
+                }
+                Picker("Événements", selection: $filter) {
+                    Text("Tout").tag(0)
+                    Text("Records").tag(1)
+                    Text("Boss").tag(2)
+                    Text("Formes").tag(3)
+                }.pickerStyle(.segmented)
+                if visible.isEmpty {
+                    NuclearCard {
+                        Text("Aucun événement historique confirmé dans cette catégorie.")
+                            .font(.subheadline).foregroundStyle(Nuclear.muted)
+                    }
+                } else {
+                    ForEach(Array(visible.prefix(120))) { event in
+                        NuclearCard {
+                            HStack(alignment: .top, spacing: 12) {
+                                Image(systemName: event.symbol)
+                                    .font(.title2).foregroundStyle(event.kind == .record ? Nuclear.gold : Nuclear.purple)
+                                    .frame(width: 28)
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(event.title).font(.subheadline.weight(.heavy)).foregroundStyle(Nuclear.paleGold)
+                                    Text(BiluxFormat.day(event.date)).font(.caption2).foregroundStyle(Nuclear.gold)
+                                    Text(event.detail).font(.caption).foregroundStyle(Nuclear.muted)
+                                }
+                                Spacer(minLength: 0)
+                            }
+                        }
+                    }
+                }
+                Text("Chronologie calculée depuis les séances existantes. Records et victoires peuvent changer si tu modifies ou supprimes d'anciennes données. Aucune récompense, session ou XP n'est créé.")
+                    .font(.caption2).foregroundStyle(Nuclear.muted)
+            }.padding(15)
+        }
+        .navigationTitle("Journal de l'Ascension")
+        .navigationBarTitleDisplayMode(.inline)
+        .modifier(PageBackground())
+        .accessibilityIdentifier("bilux.v71.chronicle")
+    }
+}
+
+private struct V71RecordCelebration: View {
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let records: [String]
+    @State private var glowing = false
+
+    var body: some View {
+        ZStack {
+            LinearGradient(colors: [Nuclear.background, Nuclear.purple.opacity(0.28), Nuclear.background],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+                .ignoresSafeArea()
+            VStack(spacing: 19) {
+                ZStack {
+                    Circle()
+                        .stroke(Nuclear.purple.opacity(0.48), style: StrokeStyle(lineWidth: 2, dash: [11, 18]))
+                        .frame(width: 202, height: 202)
+                        .rotationEffect(.degrees(glowing ? 24 : -24))
+                    Circle()
+                        .stroke(Nuclear.gold.opacity(0.55), lineWidth: 2)
+                        .frame(width: 165, height: 165)
+                        .scaleEffect(glowing ? 1.08 : 0.93)
+                    Image(systemName: "bolt.shield.fill")
+                        .font(.system(size: 85, weight: .black))
+                        .foregroundStyle(Nuclear.gold)
+                        .shadow(color: Nuclear.purple.opacity(glowing ? 0.85 : 0.22), radius: glowing ? 35 : 8)
+                        .scaleEffect(glowing ? 1.1 : 0.95)
+                }
+                .frame(height: 218)
+                .accessibilityHidden(true)
+                Text("RECORD BRISÉ ⚡")
+                    .font(.system(size: 29, weight: .black, design: .rounded))
+                    .minimumScaleFactor(0.7).lineLimit(1)
+                    .foregroundStyle(Nuclear.gold)
+                Text("LA FORGE RECONNAÎT TA PUISSANCE")
+                    .font(.caption.bold()).tracking(1.2).foregroundStyle(Nuclear.paleGold)
+                ForEach(records.prefix(4), id: \.self) { record in
+                    Text(record).font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white).multilineTextAlignment(.center)
+                }
+                Text("Record déclaré dans ton journal · aucun XP supplémentaire")
+                    .font(.caption2).foregroundStyle(Nuclear.muted)
+                    .multilineTextAlignment(.center)
+                Button("RETOUR À LA FORGE") { dismiss() }
+                    .buttonStyle(.borderedProminent).tint(Nuclear.gold)
+            }.padding(24)
+        }
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true)) { glowing = true }
+        }
     }
 }
