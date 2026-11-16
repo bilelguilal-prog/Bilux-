@@ -285,8 +285,8 @@ struct WatchRootView: View {
         TabView(selection: $selectedPage) {
             V68WatchDashboard(selectedPage: $selectedPage).tag(0)
             healthPage.tag(1)
-            questPage.tag(2)
-            ascensionPage.tag(3)
+            V69WatchQuestsPage(selectedPage: $selectedPage).tag(2)
+            V69WatchGuardiansPage(selectedPage: $selectedPage).tag(3)
             V54WatchWorkoutView().tag(4)
             V61LiveWorkoutView().tag(5)
             V68WatchMasteryPage().tag(6)
@@ -302,8 +302,15 @@ struct WatchRootView: View {
         // V6.1.1 : un appui sur le widget ouvre la page, sans lancer HKWorkoutSession.
         .onOpenURL { url in
             guard url.scheme?.lowercased() == "biluxwatch",
-                  url.host?.lowercased() == "live" else { return }
-            selectedPage = 5
+                  let destination = url.host?.lowercased() else { return }
+            switch destination {
+            case "live": selectedPage = 5 // Conserver le lien ⚡ LIVE V6.1.1.
+            case "xp", "profile": selectedPage = 0
+            case "quests": selectedPage = 2
+            case "guardians": selectedPage = 3
+            case "mastery": selectedPage = 6
+            default: return
+            }
             bridge.refresh()
         }
     }
@@ -1259,6 +1266,23 @@ private struct V68ReactorCore: View {
             Circle()
                 .stroke(V54ReactorTheme.purple.opacity(0.35), lineWidth: 1)
                 .padding(11)
+            // Watch 4.1 : deux impulsions orbitales lentes, sans timer ni calcul continu.
+            Circle()
+                .trim(from: 0.04, to: 0.19)
+                .stroke(V54ReactorTheme.gold.opacity(0.8),
+                        style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                .rotationEffect(.degrees(awakened && !reduceMotion ? 300 : 0))
+                .animation(reduceMotion ? nil : .linear(duration: 9).repeatForever(autoreverses: false),
+                           value: awakened)
+                .padding(5)
+            Circle()
+                .trim(from: 0.51, to: 0.58)
+                .stroke(V54ReactorTheme.purple.opacity(0.8),
+                        style: StrokeStyle(lineWidth: 1.8, lineCap: .round))
+                .rotationEffect(.degrees(awakened && !reduceMotion ? -270 : 0))
+                .animation(reduceMotion ? nil : .linear(duration: 11).repeatForever(autoreverses: false),
+                           value: awakened)
+                .padding(5)
             Image(systemName: "atom")
                 .font(.system(size: 29, weight: .regular))
                 .foregroundStyle(V54ReactorTheme.gold)
@@ -1292,7 +1316,7 @@ private struct V68WatchDashboard: View {
                         .font(.system(size: 19, weight: .black, design: .rounded))
                         .tracking(2)
                     Spacer(minLength: 2)
-                    Text("WATCH 4.0")
+                    Text("WATCH 4.1")
                         .font(.system(size: 8, weight: .heavy, design: .rounded))
                         .foregroundStyle(V54ReactorTheme.paleGold)
                 }
@@ -1353,6 +1377,29 @@ private struct V68WatchDashboard: View {
                             }
                         }
                     }
+                }
+
+                // Quêtes uniquement depuis le résumé Watch envoyé par l'iPhone.
+                V54ReactorCard(accent: V54ReactorTheme.purple) {
+                    HStack(spacing: 4) {
+                        Label("QUÊTES DU JOUR", systemImage: "checkmark.seal.fill")
+                            .font(.system(size: 10, weight: .heavy))
+                            .foregroundStyle(V54ReactorTheme.paleGold)
+                        Spacer(minLength: 2)
+                        Text("\(bridge.snapshot.quests.filter { $0.completed }.count)/\(bridge.snapshot.quests.count)")
+                            .font(.system(size: 12, weight: .black, design: .rounded))
+                            .foregroundStyle(V54ReactorTheme.gold)
+                    }
+                    ProgressView(value: Double(bridge.snapshot.quests.filter { $0.completed }.count),
+                                 total: Double(max(1, bridge.snapshot.quests.count)))
+                        .tint(V54ReactorTheme.purple)
+                    Button { selectedPage = 2 } label: {
+                        Label("VOIR LES MISSIONS", systemImage: "arrow.up.right")
+                            .font(.system(size: 10, weight: .heavy))
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(V54ReactorTheme.purple)
                 }
 
                 Button {
@@ -1501,5 +1548,197 @@ private struct V68WatchMasteryPage: View {
             }
         }
         .accessibilityElement(children: .combine)
+    }
+}
+
+// MARK: - BILUX V6.9 · NUCLEAR WATCH 4.1
+// Les données viennent exclusivement du résumé iPhone existant.
+// Aucun XP, combat ou état de quête n'est créé localement par cette interface.
+
+private struct V69WatchQuestsPage: View {
+    @EnvironmentObject private var bridge: WatchBridge
+    @Binding var selectedPage: Int
+
+    private var quests: [WatchQuest] { bridge.snapshot.quests }
+    private var completedCount: Int { quests.filter { $0.completed }.count }
+    private var isFresh: Bool {
+        bridge.snapshot.updatedAt != .distantPast &&
+        Calendar.current.isDateInToday(bridge.snapshot.updatedAt)
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 9) {
+                V54ReactorTitle(text: "QUÊTES DU NOYAU", symbol: "checkmark.seal.fill")
+
+                V54ReactorCard(accent: V54ReactorTheme.gold) {
+                    HStack {
+                        Label("MISSIONS DU JOUR", systemImage: "bolt.shield.fill")
+                            .font(.system(size: 10, weight: .heavy))
+                            .foregroundStyle(V54ReactorTheme.paleGold)
+                        Spacer(minLength: 2)
+                        Text("\(completedCount)/\(quests.count)")
+                            .font(.system(size: 15, weight: .black, design: .rounded))
+                            .foregroundStyle(V54ReactorTheme.gold)
+                            .monospacedDigit()
+                    }
+                    ProgressView(value: Double(completedCount), total: Double(max(1, quests.count)))
+                        .tint(V54ReactorTheme.gold)
+                    if !isFresh {
+                        Label("Résumé à actualiser depuis l'iPhone", systemImage: "exclamationmark.arrow.circlepath")
+                            .font(.system(size: 9))
+                            .foregroundStyle(V54ReactorTheme.secondary)
+                    }
+                }
+
+                if quests.isEmpty {
+                    V54ReactorCard(accent: V54ReactorTheme.purple) {
+                        Text("Aucune quête synchronisée")
+                            .font(.system(size: 11, weight: .bold))
+                        Text("Ouvre BILUX sur ton iPhone, puis actualise la montre.")
+                            .font(.system(size: 10))
+                            .foregroundStyle(V54ReactorTheme.secondary)
+                    }
+                } else {
+                    ForEach(quests) { quest in
+                        V54ReactorCard(accent: quest.completed ? V54ReactorTheme.gold : V54ReactorTheme.purple) {
+                            HStack(alignment: .top, spacing: 6) {
+                                Image(systemName: quest.completed ? "checkmark.seal.fill" : "circle.dotted")
+                                    .foregroundStyle(quest.completed ? V54ReactorTheme.gold : V54ReactorTheme.purple)
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(quest.title)
+                                        .font(.system(size: 11, weight: .heavy))
+                                        .fixedSize(horizontal: false, vertical: true)
+                                    Text(quest.completed ? "ACCOMPLIE" : "EN COURS")
+                                        .font(.system(size: 9, weight: .bold))
+                                        .foregroundStyle(V54ReactorTheme.secondary)
+                                    Text("Récompense prévue : \(quest.reward) XP")
+                                        .font(.system(size: 9))
+                                        .foregroundStyle(V54ReactorTheme.paleGold)
+                                }
+                                Spacer(minLength: 0)
+                            }
+                            if quest.id == "workout" && !quest.completed {
+                                Button {
+                                    selectedPage = 5
+                                } label: {
+                                    Label("NUCLEAR LIVE", systemImage: "heart.fill")
+                                        .font(.system(size: 10, weight: .bold))
+                                        .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.bordered)
+                                .tint(V54ReactorTheme.purple)
+                            } else if !quest.completed {
+                                Text("À consigner dans BILUX iPhone")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(V54ReactorTheme.secondary)
+                            }
+                        }
+                    }
+                }
+
+                Button { bridge.refresh() } label: {
+                    Label("ACTUALISER LES QUÊTES", systemImage: "arrow.clockwise")
+                        .font(.system(size: 10, weight: .heavy))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+                .tint(V54ReactorTheme.gold)
+
+                Text("La montre affiche les états reçus de l'iPhone : aucun XP n'est ajouté ici.")
+                    .font(.system(size: 9))
+                    .foregroundStyle(V54ReactorTheme.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 5)
+            .padding(.bottom, 8)
+        }
+        .containerBackground(.clear, for: .tabView)
+    }
+}
+
+private struct V69WatchGuardiansPage: View {
+    @EnvironmentObject private var bridge: WatchBridge
+    @Binding var selectedPage: Int
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 9) {
+                V54ReactorTitle(text: "ARÈNE DES GARDIENS", symbol: "shield.fill")
+
+                V54ReactorCard(accent: V54ReactorTheme.purple) {
+                    Label("COMBATS SYMBOLIQUES", systemImage: "bolt.shield.fill")
+                        .font(.system(size: 10, weight: .heavy))
+                        .foregroundStyle(V54ReactorTheme.paleGold)
+                    Text("Chaque journée d'entraînement éligible fait reculer les Gardiens.")
+                        .font(.system(size: 10))
+                        .foregroundStyle(V54ReactorTheme.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                guardian(name: "GARDIEN DU RÉACTEUR", symbol: "shield.fill",
+                         current: bridge.snapshot.monthlyWorkouts, target: 12,
+                         period: "MOIS", tint: V54ReactorTheme.purple)
+                guardian(name: "SOUVERAIN DU NÉANT", symbol: "crown.fill",
+                         current: bridge.snapshot.quarterWorkouts, target: 30,
+                         period: "TRIMESTRE", tint: V54ReactorTheme.gold)
+
+                Button { selectedPage = 5 } label: {
+                    Label("OUVRIR NUCLEAR LIVE", systemImage: "heart.fill")
+                        .font(.system(size: 10, weight: .heavy))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(V54ReactorTheme.purple)
+
+                Button { bridge.refresh() } label: {
+                    Label("ACTUALISER L'ARÈNE", systemImage: "arrow.clockwise")
+                        .font(.system(size: 10, weight: .semibold))
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.bordered)
+
+                Text("Une seule journée éligible par date, au plus cinq par semaine. Aucun malus de repos. Résultats calculés sur l'iPhone.")
+                    .font(.system(size: 9))
+                    .foregroundStyle(V54ReactorTheme.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(.horizontal, 5)
+            .padding(.bottom, 8)
+        }
+        .containerBackground(.clear, for: .tabView)
+    }
+
+    private func guardian(name: String, symbol: String, current: Int?, target: Int,
+                          period: String, tint: Color) -> some View {
+        V54ReactorCard(accent: tint) {
+            Label(name, systemImage: symbol)
+                .font(.system(size: 11, weight: .heavy))
+                .foregroundStyle(tint)
+                .fixedSize(horizontal: false, vertical: true)
+            if let current {
+                let effective = min(target, max(0, current))
+                let remainingHP = Int((100.0 * Double(target - effective) / Double(target)).rounded())
+                let phase = min(4, Int(Double(effective) * 4 / Double(target)) + 1)
+                HStack(alignment: .firstTextBaseline) {
+                    Text("\(remainingHP)% PV")
+                        .font(.system(size: 18, weight: .black, design: .rounded))
+                        .monospacedDigit()
+                    Spacer(minLength: 2)
+                    Text("\(effective)/\(target) JOURS")
+                        .font(.system(size: 9, weight: .heavy))
+                        .foregroundStyle(V54ReactorTheme.paleGold)
+                }
+                ProgressView(value: Double(effective), total: Double(target))
+                    .tint(tint)
+                Text(effective >= target ? "VICTOIRE · GARDIEN VAINCU" : "\(period) · PHASE \(phase)/4")
+                    .font(.system(size: 10, weight: .heavy))
+                    .foregroundStyle(V54ReactorTheme.secondary)
+            } else {
+                Text("Ouvre BILUX sur l'iPhone pour synchroniser les journées éligibles.")
+                    .font(.system(size: 10))
+                    .foregroundStyle(V54ReactorTheme.secondary)
+            }
+        }
     }
 }
