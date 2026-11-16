@@ -1148,6 +1148,13 @@ struct HomeScreen: View {
                             .background(Nuclear.gold.opacity(0.10), in: Circle())
                     }
                     heroPanel
+                        .overlay(alignment: .bottomTrailing) {
+                            V72CoreSeal(stageIndex: journal.unlockedStageIndex,
+                                        masteryTotal: V63MasterySnapshot.evaluate(journal.data).unlockedTotal)
+                                .frame(width: 76, height: 76)
+                                .padding(13)
+                                .allowsHitTesting(false)
+                        }
                     V70RebirthCommandDeck().environmentObject(journal)
                     Button { showImmersion = true } label: {
                         Label("CONTEMPLER MON PERSONNAGE", systemImage: "viewfinder")
@@ -1659,6 +1666,7 @@ struct AscensionScreen: View {
                     .tint(Nuclear.gold)
                     .disabled(selectedStage > journal.unlockedStageIndex)
                     .accessibilityIdentifier("bilux.v67.openImmersion.ascension")
+                    V72AwakeningEntry().environmentObject(journal)
                     SectionCaption(title: "Ton ascension")
                     NuclearCard {
                         HStack(spacing: 17) {
@@ -3874,6 +3882,7 @@ private struct V70RebirthCommandDeck: View {
                     .font(.system(size: 24, weight: .medium)).foregroundStyle(Nuclear.gold)
                     .accessibilityHidden(true)
             }
+            V72AwakeningEntry().environmentObject(journal)
             HStack(spacing: 9) {
                 V70RebirthTile(title: "SÉANCES / 7 J", value: "\(week.count)",
                                symbol: "dumbbell.fill", color: Nuclear.gold)
@@ -4833,6 +4842,370 @@ private struct V71RecordCelebration: View {
         .onAppear {
             guard !reduceMotion else { return }
             withAnimation(.easeInOut(duration: 1.0).repeatForever(autoreverses: true)) { glowing = true }
+        }
+    }
+}
+
+// MARK: - BILUX V7.2 · NUCLEAR AWAKENING
+// Pure presentation. Unlocks are derived from existing V5.5 and V6.3 data.
+// No XP, achievements, dates, HealthKit, storage schema or Watch changes.
+
+private struct V72Milestone: Identifiable {
+    let id: Int
+    let name: String
+    let subtitle: String
+    let symbol: String
+
+    static let all: [V72Milestone] = [
+        .init(id: 10, name: "PREMIER ÉVEIL", subtitle: "Le noyau commence à répondre.", symbol: "bolt.fill"),
+        .init(id: 25, name: "RÉACTEUR EN FUSION", subtitle: "L'énergie prend forme.", symbol: "atom"),
+        .init(id: 50, name: "MAÎTRISE NUCLÉAIRE", subtitle: "La puissance devient discipline.", symbol: "shield.lefthalf.filled"),
+        .init(id: 75, name: "LÉGENDE DU RÉACTEUR", subtitle: "L'orage répond à l'appel.", symbol: "crown.fill"),
+        .init(id: 100, name: "ASCENSION ABSOLUE", subtitle: "La dernière forme est révélée.", symbol: "sparkles")
+    ]
+}
+
+private struct V72CoreSeal: View {
+    let stageIndex: Int
+    let masteryTotal: Int
+    @AppStorage("bilux.effectsEnabled") private var effectsEnabled = true
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var accent: Color {
+        NuclearStage.all[min(max(0, stageIndex), NuclearStage.all.count - 1)].accent
+    }
+    private var layers: Int { 1 + min(3, max(0, stageIndex)) }
+    private var motionAllowed: Bool { effectsEnabled && !reduceMotion }
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 18.0, paused: !motionAllowed)) { context in
+            let time = context.date.timeIntervalSinceReferenceDate
+            let glow = motionAllowed ? (sin(time * 1.35) + 1.0) / 2.0 : 0.35
+            ZStack {
+                Circle()
+                    .fill(RadialGradient(colors: [accent.opacity(0.30 + glow * 0.23),
+                                                  Nuclear.purple.opacity(0.15), .clear],
+                                         center: .center, startRadius: 2, endRadius: 82))
+                ForEach(0..<layers, id: \.self) { layer in
+                    Circle()
+                        .trim(from: 0.08, to: 0.66)
+                        .stroke(AngularGradient(colors: [.clear, accent,
+                                                        Nuclear.purple.opacity(0.9), .clear],
+                                                center: .center),
+                                style: StrokeStyle(lineWidth: layer == 0 ? 3.0 : 1.5,
+                                                   lineCap: .round))
+                        .padding(CGFloat(5 + layer * 12))
+                        .rotationEffect(.degrees(motionAllowed
+                            ? (time * (layer.isMultiple(of: 2) ? 9.0 : -7.0))
+                            : Double(layer * 40)))
+                        .opacity(0.58 + glow * 0.35)
+                }
+                Image(systemName: stageIndex >= 3 ? "crown.fill" : "atom")
+                    .font(.system(size: 31, weight: .bold))
+                    .foregroundStyle(Nuclear.paleGold)
+                    .shadow(color: accent.opacity(0.85), radius: CGFloat(6 + glow * 8))
+                if masteryTotal >= 4 {
+                    Circle().stroke(Nuclear.paleGold.opacity(0.42 + glow * 0.32), lineWidth: 1.1)
+                        .padding(3)
+                }
+            }
+        }
+        .aspectRatio(1, contentMode: .fit)
+        .allowsHitTesting(false)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Réacteur visuel, rang \(stageIndex + 1) sur 5, \(masteryTotal) maîtrises débloquées")
+    }
+}
+
+private struct V72AwakeningEntry: View {
+    @EnvironmentObject private var journal: BiluxStore
+    private var unlocked: Int { V63MasterySnapshot.evaluate(journal.data).unlockedTotal }
+
+    var body: some View {
+        NavigationLink {
+            V72AwakeningChamber().environmentObject(journal)
+        } label: {
+            HStack(spacing: 12) {
+                V72CoreSeal(stageIndex: journal.unlockedStageIndex, masteryTotal: unlocked)
+                    .frame(width: 60, height: 60)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("CHAMBRE D'ÉVEIL · V7.2")
+                        .font(.caption.weight(.black)).tracking(1.2)
+                        .foregroundStyle(Nuclear.gold)
+                    Text("TRANSFORMATIONS & RELIQUES")
+                        .font(.subheadline.weight(.heavy)).foregroundStyle(.white)
+                    Text("Rang \(journal.rankName) · \(unlocked)/12 maîtrises")
+                        .font(.caption2).foregroundStyle(Nuclear.muted)
+                }
+                Spacer(minLength: 2)
+                Image(systemName: "chevron.right")
+                    .font(.subheadline.bold()).foregroundStyle(Nuclear.gold)
+            }
+            .padding(12)
+            .background(Nuclear.panel, in: RoundedRectangle(cornerRadius: 15))
+            .overlay(RoundedRectangle(cornerRadius: 15)
+                .stroke(LinearGradient(colors: [Nuclear.gold.opacity(0.8), Nuclear.purple.opacity(0.48)],
+                                       startPoint: .topLeading, endPoint: .bottomTrailing), lineWidth: 1.2))
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("bilux.v72.openAwakening")
+    }
+}
+
+private struct V72AwakeningChamber: View {
+    @EnvironmentObject private var journal: BiluxStore
+    @AppStorage("bilux.effectsEnabled") private var effectsEnabled = true
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var cinemaStage: NuclearStage?
+    @State private var cinemaMilestone: V72Milestone?
+
+    private var mastery: V63MasterySnapshot { V63MasterySnapshot.evaluate(journal.data) }
+    private var rank: NuclearStage {
+        NuclearStage.all[min(max(0, journal.unlockedStageIndex), NuclearStage.all.count - 1)]
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("BILUX · NUCLEAR AWAKENING")
+                        .font(.caption2.weight(.black)).tracking(2.0)
+                        .foregroundStyle(Nuclear.purple)
+                    Text("CHAMBRE D'ÉVEIL")
+                        .font(.title2.weight(.black)).foregroundStyle(Nuclear.paleGold)
+                    Text("Une récompense visuelle pour chaque véritable palier.")
+                        .font(.caption).foregroundStyle(Nuclear.muted)
+                }
+
+                ZStack(alignment: .bottom) {
+                    NuclearHeroAura(level: journal.heroLevel,
+                                    effectsEnabled: effectsEnabled,
+                                    stageOverride: rank,
+                                    minimumStage: journal.unlockedStageIndex,
+                                    masteryCount: mastery.unlockedTotal,
+                                    dominantPath: V64StormMastery.dominantPath(journal.data))
+                        .frame(height: 335).clipped()
+                    LinearGradient(colors: [.clear, Nuclear.background.opacity(0.82)],
+                                   startPoint: .center, endPoint: .bottom)
+                        .frame(height: 110)
+                        .allowsHitTesting(false)
+                    HStack(alignment: .bottom, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(rank.name.uppercased())
+                                .font(.headline.weight(.black)).foregroundStyle(rank.accent)
+                            Text("NIVEAU \(journal.heroLevel) · \(journal.totalXP) XP")
+                                .font(.caption.bold()).foregroundStyle(.white)
+                        }
+                        Spacer(minLength: 0)
+                        V72CoreSeal(stageIndex: journal.unlockedStageIndex,
+                                    masteryTotal: mastery.unlockedTotal)
+                            .frame(width: 86, height: 86)
+                    }
+                    .padding(13)
+                }
+                .background(Nuclear.panel)
+                .clipShape(RoundedRectangle(cornerRadius: 17))
+                .overlay(RoundedRectangle(cornerRadius: 17)
+                    .stroke(rank.accent.opacity(0.70), lineWidth: 1.1))
+                .accessibilityIdentifier("bilux.v72.heroReactor")
+
+                Button { cinemaStage = rank } label: {
+                    Label("REVOIR L'ÉVEIL DU RANG", systemImage: "film.stack.fill")
+                        .font(.subheadline.weight(.black))
+                        .frame(maxWidth: .infinity, minHeight: 45)
+                }
+                .buttonStyle(.borderedProminent).tint(Nuclear.gold)
+
+                SectionCaption(title: "Reliques des cinq rangs")
+                Text("Déblocages automatiques selon tes rangs existants. Aucun XP supplémentaire.")
+                    .font(.caption).foregroundStyle(Nuclear.muted)
+                ForEach(NuclearStage.all) { stage in
+                    let achieved = stage.id <= journal.unlockedStageIndex
+                    HStack(spacing: 12) {
+                        Image(systemName: achieved ? stage.symbol : "lock.fill")
+                            .font(.title3).frame(width: 32)
+                            .foregroundStyle(achieved ? stage.accent : .gray)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("SCEAU · \(stage.name.uppercased())")
+                                .font(.subheadline.bold()).foregroundStyle(.white)
+                            Text(achieved ? "RELIQUE ACQUISE" : "Rang non débloqué")
+                                .font(.caption2).foregroundStyle(achieved ? Nuclear.gold : Nuclear.muted)
+                        }
+                        Spacer()
+                        if achieved {
+                            Image(systemName: "checkmark.seal.fill").foregroundStyle(Nuclear.gold)
+                        }
+                    }
+                    .padding(12)
+                    .background(Nuclear.panel, in: RoundedRectangle(cornerRadius: 12))
+                }
+
+                SectionCaption(title: "Signatures des quatre voies")
+                Text("Chaque voie enrichit visuellement le réacteur à mesure que ses compétences sont acquises.")
+                    .font(.caption).foregroundStyle(Nuclear.muted)
+                ForEach(mastery.branches) { branch in
+                    HStack(spacing: 12) {
+                        Image(systemName: branch.icon)
+                            .font(.title2).frame(width: 35)
+                            .foregroundStyle(branch.unlockedCount > 0 ? Nuclear.purple : .gray)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(branch.title).font(.subheadline.weight(.heavy)).foregroundStyle(.white)
+                            Text("\(branch.unlockedCount)/3 insignes révélés")
+                                .font(.caption2).foregroundStyle(Nuclear.muted)
+                            HStack(spacing: 6) {
+                                ForEach(branch.nodes) { node in
+                                    Image(systemName: node.achieved ? node.icon : "lock.fill")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(node.achieved ? Nuclear.gold : .gray)
+                                        .frame(maxWidth: .infinity, minHeight: 24)
+                                        .background(node.achieved ? Nuclear.gold.opacity(0.12)
+                                                  : Color.gray.opacity(0.10),
+                                                    in: RoundedRectangle(cornerRadius: 6))
+                                        .accessibilityLabel("\(node.title) : \(node.achieved ? "acquis" : "verrouillé")")
+                                }
+                            }
+                        }
+                    }
+                    .padding(12)
+                    .background(Nuclear.panel, in: RoundedRectangle(cornerRadius: 12))
+                }
+
+                SectionCaption(title: "Cinématiques des grands paliers")
+                ForEach(V72Milestone.all) { milestone in
+                    let attained = journal.heroLevel >= milestone.id
+                    NuclearCard {
+                        HStack(spacing: 12) {
+                            Image(systemName: attained ? milestone.symbol : "lock.fill")
+                                .font(.title2).frame(width: 28)
+                                .foregroundStyle(attained ? Nuclear.gold : Nuclear.muted)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(milestone.name)
+                                    .font(.subheadline.weight(.heavy)).foregroundStyle(.white)
+                                Text("PALIER NIVEAU \(milestone.id) · \(attained ? "ATTEINT" : "À DÉBLOQUER")")
+                                    .font(.caption2).foregroundStyle(attained ? Nuclear.gold : Nuclear.muted)
+                            }
+                            Spacer(minLength: 4)
+                            if attained {
+                                Button("REVOIR") { cinemaMilestone = milestone }
+                                    .font(.caption.bold()).tint(Nuclear.gold)
+                            }
+                        }
+                    }
+                }
+                NavigationLink {
+                    V71AscensionChronicleView().environmentObject(journal)
+                } label: {
+                    Label("OUVRIR LE JOURNAL DE L'ASCENSION", systemImage: "book.closed.fill")
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                }
+                .buttonStyle(.bordered).tint(Nuclear.purple)
+                Text("Les ornements sont calculés à partir des données déjà sauvegardées. Supprimer d'anciennes séances peut modifier les déblocages. Les cinématiques rejouées ne donnent pas d'XP.")
+                    .font(.caption2).foregroundStyle(Nuclear.muted)
+            }
+            .padding(15)
+        }
+        .navigationTitle("Éveil nucléaire")
+        .navigationBarTitleDisplayMode(.inline)
+        .modifier(PageBackground())
+        .fullScreenCover(item: $cinemaStage) { stage in
+            BILUXV57RankCinema(stage: stage, effectsEnabled: effectsEnabled) {
+                cinemaStage = nil
+            }
+        }
+        .fullScreenCover(item: $cinemaMilestone) { milestone in
+            V72MilestoneCinema(milestone: milestone, stage: rank,
+                                level: journal.heroLevel,
+                                masteryCount: mastery.unlockedTotal,
+                                dominantPath: V64StormMastery.dominantPath(journal.data),
+                                effectsEnabled: effectsEnabled) {
+                cinemaMilestone = nil
+            }
+        }
+        .accessibilityIdentifier("bilux.v72.awakening")
+    }
+}
+
+// Replays are cinematic only; no XP or historical event is written.
+private struct V72MilestoneCinema: View {
+    let milestone: V72Milestone
+    let stage: NuclearStage
+    let level: Int
+    let masteryCount: Int
+    let dominantPath: String
+    let effectsEnabled: Bool
+    let onDismiss: () -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var phase: Int = 0
+
+    var body: some View {
+        GeometryReader { geometry in
+            ZStack {
+                Nuclear.background.ignoresSafeArea()
+                NuclearHeroAura(level: level, effectsEnabled: effectsEnabled,
+                                stageOverride: stage, minimumStage: stage.id,
+                                masteryCount: masteryCount, dominantPath: dominantPath)
+                    .frame(width: geometry.size.width, height: geometry.size.height)
+                    .clipped()
+                    .opacity(phase == 0 && effectsEnabled && !reduceMotion ? 0.45 : 1.0)
+                LinearGradient(colors: [Nuclear.background.opacity(0.55), .clear,
+                                        Nuclear.background.opacity(0.60), Nuclear.background],
+                               startPoint: .top, endPoint: .bottom)
+                    .ignoresSafeArea()
+                VStack(spacing: 17) {
+                    HStack {
+                        Text("NUCLEAR AWAKENING · V7.2")
+                            .font(.caption2.weight(.black)).tracking(1.4)
+                            .foregroundStyle(Nuclear.paleGold)
+                        Spacer()
+                        Button("PASSER") { onDismiss() }
+                            .font(.caption.bold()).foregroundStyle(.white)
+                            .padding(9).background(.black.opacity(0.65), in: Capsule())
+                    }
+                    Spacer()
+                    V72CoreSeal(stageIndex: stage.id, masteryTotal: masteryCount)
+                        .frame(width: phase >= 2 ? 180 : 124,
+                               height: phase >= 2 ? 180 : 124)
+                        .accessibilityHidden(true)
+                    Text(phase < 2 ? "LE RÉACTEUR S'ÉVEILLE" : "PALIER RÉVÉLÉ")
+                        .font(.caption.weight(.black)).tracking(2.0)
+                        .foregroundStyle(Nuclear.paleGold)
+                    Text(milestone.name)
+                        .font(.system(size: 31, weight: .black, design: .rounded))
+                        .minimumScaleFactor(0.6).lineLimit(2)
+                        .foregroundStyle(.white)
+                        .multilineTextAlignment(.center)
+                        .shadow(color: stage.accent.opacity(0.9), radius: 14)
+                    Text("NIVEAU \(milestone.id) · \(milestone.subtitle)")
+                        .font(.subheadline).multilineTextAlignment(.center)
+                        .foregroundStyle(Nuclear.paleGold)
+                    Button { onDismiss() } label: {
+                        Label("CONTINUER L'ASCENSION", systemImage: "crown.fill")
+                            .font(.subheadline.weight(.bold))
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                    .buttonStyle(.borderedProminent).tint(Nuclear.gold)
+                    .disabled(effectsEnabled && !reduceMotion && phase < 3)
+                    .opacity(effectsEnabled && !reduceMotion && phase < 3 ? 0.55 : 1)
+                    Spacer().frame(height: 22)
+                }
+                .padding(.horizontal, 24)
+                .padding(.top, 20)
+            }
+            .frame(width: geometry.size.width, height: geometry.size.height)
+        }
+        .background(Nuclear.background)
+        .task {
+            guard effectsEnabled && !reduceMotion else { phase = 3; return }
+            try? await Task.sleep(nanoseconds: 550_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.55)) { phase = 1 }
+            try? await Task.sleep(nanoseconds: 850_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.60)) { phase = 2 }
+            try? await Task.sleep(nanoseconds: 850_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeOut(duration: 0.25)) { phase = 3 }
         }
     }
 }
