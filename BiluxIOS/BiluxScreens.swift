@@ -4014,7 +4014,8 @@ private struct V70NuclearForge: View {
     @State private var saved = false
     @State private var achievedRecords: [String] = []
     @State private var programLinkWarning: String?
-    @State private var showRecordCelebration = false
+    @State private var v74LatestReport: V74SessionReport?
+    @State private var showV74Report = false
     @State private var restUntil: Date?
 
     private var knownRecords: [String: Double] {
@@ -4155,6 +4156,14 @@ private struct V70NuclearForge: View {
                                 Text(item).font(.subheadline).foregroundStyle(Nuclear.paleGold)
                             }
                         }
+                        if v74LatestReport != nil {
+                            Button {
+                                showV74Report = true
+                            } label: {
+                                Label("REVOIR LE DÉBRIEF COMPLET", systemImage: "doc.text.magnifyingglass")
+                            }
+                            .buttonStyle(.bordered).tint(Nuclear.purple)
+                        }
                         Button("RETOUR AU JOURNAL") { dismiss() }
                             .frame(maxWidth: .infinity)
                             .buttonStyle(.borderedProminent).tint(Nuclear.gold)
@@ -4174,8 +4183,10 @@ private struct V70NuclearForge: View {
             .padding(15)
         }
         .navigationTitle("La Forge")
-        .sheet(isPresented: $showRecordCelebration) {
-            V71RecordCelebration(records: achievedRecords)
+        .sheet(isPresented: $showV74Report) {
+            if let v74LatestReport {
+                V74UnifiedDebrief(report: v74LatestReport)
+            }
         }
         .navigationBarTitleDisplayMode(.inline)
         .modifier(PageBackground())
@@ -4245,6 +4256,18 @@ private struct V70NuclearForge: View {
             errorText = "Ajoute au moins un exercice avant d'enregistrer la séance."
             return
         }
+        let xpBefore = journal.totalXP
+        let guardiansBefore = Dictionary(uniqueKeysWithValues: BILUXV56Boss.allCases.map {
+            ($0.id, $0.countedDays(in: journal.data))
+        })
+        let ledgerBefore = try? V73LedgerStore.load()
+        let campaignBefore: Int? = {
+            guard let launch,
+                  let ledger = ledgerBefore,
+                  let plan = ledger.plans.first(where: { $0.id == launch.planID }) else { return nil }
+            return V73CampaignEngine.progress(plan: plan, ledger: ledger,
+                                              workouts: journal.data.workouts).counted
+        }()
         let previous = knownRecords
         var newRecords: [String] = []
         for exercise in exercises {
@@ -4266,8 +4289,30 @@ private struct V70NuclearForge: View {
             }
         }
         achievedRecords = Array(Set(newRecords)).sorted()
+        let guardianImpacts = BILUXV56Boss.allCases.map { boss in
+            V74GuardianImpact(id: boss.id, title: boss.title,
+                              before: guardiansBefore[boss.id] ?? 0,
+                              after: boss.countedDays(in: journal.data),
+                              target: boss.target)
+        }
+        var campaignImpact: V74CampaignImpact?
+        if let launch, let before = campaignBefore,
+           programLinkWarning == nil,
+           let ledgerAfter = try? V73LedgerStore.load(),
+           let plan = ledgerAfter.plans.first(where: { $0.id == launch.planID }) {
+            let after = V73CampaignEngine.progress(plan: plan, ledger: ledgerAfter,
+                                                    workouts: journal.data.workouts).counted
+            campaignImpact = V74CampaignImpact(title: launch.planName, before: before, after: after)
+        }
+        v74LatestReport = V74SessionReport(workout: savedWorkout,
+                                            records: achievedRecords,
+                                            xpBefore: xpBefore,
+                                            xpAfter: journal.totalXP,
+                                            guardians: guardianImpacts,
+                                            campaign: campaignImpact,
+                                            campaignNote: programLinkWarning)
         saved = true
-        showRecordCelebration = !achievedRecords.isEmpty
+        showV74Report = true
     }
 }
 
@@ -6029,5 +6074,203 @@ private struct V73VictoryCinema: View {
             .padding(24)
         }
         .accessibilityIdentifier("bilux.v73.victory")
+    }
+}
+
+// MARK: - BILUX V7.4 · NUCLEAR SYNCHRONIZATION
+// Débrief unique en lecture seule après une séance réellement ajoutée au journal.
+// XP et dommages proviennent de comparaisons avant/après, jamais de récompenses ajoutées.
+
+private struct V74GuardianImpact: Identifiable {
+    let id: String
+    let title: String
+    let before: Int
+    let after: Int
+    let target: Int
+
+    var addedDays: Int { max(0, min(target, after) - min(target, before)) }
+    var currentProgress: Double { Double(min(target, after)) / Double(max(1, target)) }
+}
+
+private struct V74CampaignImpact {
+    let title: String
+    let before: Int
+    let after: Int
+    var addedDays: Int { max(0, after - before) }
+    var damage: Int { addedDays * 100 } // Règle réelle V7.3 : 100 PV / jour éligible.
+    var remainingHP: Int { max(0, (12 - min(12, after)) * 100) }
+}
+
+private struct V74SessionReport {
+    let workout: WorkoutSession
+    let records: [String]
+    let xpBefore: Int
+    let xpAfter: Int
+    let guardians: [V74GuardianImpact]
+    let campaign: V74CampaignImpact?
+    let campaignNote: String?
+
+    var xpChange: Int { xpAfter - xpBefore }
+    var sessionVolume: Double {
+        workout.exercises.reduce(0) { sum, exercise in
+            sum + exercise.sets.reduce(0) { subtotal, set in
+                guard set.weight.isFinite, (0...1000).contains(set.weight),
+                      (1...300).contains(set.reps) else { return subtotal }
+                return subtotal + Double(set.reps) * set.weight
+            }
+        }
+    }
+    var numberOfSets: Int { workout.exercises.reduce(0) { $0 + $1.sets.count } }
+}
+
+private struct V74UnifiedDebrief: View {
+    let report: V74SessionReport
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @AppStorage("bilux.effectsEnabled") private var effectsEnabled = true
+    @State private var energyPulse = false
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 15) {
+                    VStack(spacing: 9) {
+                        ZStack {
+                            Circle().stroke(Nuclear.purple.opacity(0.38), lineWidth: 2)
+                                .frame(width: 125, height: 125)
+                                .scaleEffect(energyPulse ? 1.08 : 0.96)
+                            Circle().fill(Nuclear.gold.opacity(0.09))
+                                .frame(width: 102, height: 102)
+                            Image(systemName: report.records.isEmpty ? "checkmark.shield.fill" : "bolt.shield.fill")
+                                .font(.system(size: 60, weight: .light))
+                                .foregroundStyle(Nuclear.gold)
+                                .shadow(color: Nuclear.purple.opacity(energyPulse ? 0.8 : 0.3), radius: 18)
+                        }
+                        .frame(height: 138)
+                        .accessibilityHidden(true)
+                        Text(report.records.isEmpty ? "SÉANCE TERMINÉE" : "RECORD BRISÉ ⚡")
+                            .font(.system(size: 25, weight: .black, design: .rounded))
+                            .foregroundStyle(Nuclear.gold)
+                            .minimumScaleFactor(0.75)
+                            .lineLimit(1)
+                        Text("NUCLEAR SYNCHRONIZATION · V7.4")
+                            .font(.caption2.weight(.black)).tracking(1.5)
+                            .foregroundStyle(Nuclear.purple)
+                        Text("\(BiluxFormat.day(report.workout.date)) · \(report.workout.durationMinutes) min")
+                            .font(.subheadline).foregroundStyle(Nuclear.paleGold)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 7)
+
+                    SectionCaption(title: "Bilan de la Forge")
+                    HStack(spacing: 9) {
+                        V70RebirthTile(title: "EXERCICES", value: "\(report.workout.exercises.count)",
+                                       symbol: "dumbbell.fill", color: Nuclear.gold)
+                        V70RebirthTile(title: "SÉRIES", value: "\(report.numberOfSets)",
+                                       symbol: "list.number", color: Nuclear.purple)
+                    }
+                    HStack(spacing: 9) {
+                        V70RebirthTile(title: "VOLUME", value: BiluxFormat.number(report.sessionVolume),
+                                       symbol: "scalemass.fill", color: Nuclear.purple)
+                        V70RebirthTile(title: "VARIATION XP", value: report.xpChange > 0 ? "+\(report.xpChange)" : "\(report.xpChange)",
+                                       symbol: "star.circle.fill", color: Nuclear.gold)
+                    }
+                    NuclearCard {
+                        HStack {
+                            Text("XP AVANT").font(.caption.bold()).foregroundStyle(Nuclear.muted)
+                            Spacer()
+                            Text("\(report.xpBefore)").font(.caption.monospacedDigit()).foregroundStyle(Nuclear.paleGold)
+                        }
+                        HStack {
+                            Text("XP APRÈS").font(.caption.bold()).foregroundStyle(Nuclear.muted)
+                            Spacer()
+                            Text("\(report.xpAfter)").font(.caption.monospacedDigit()).foregroundStyle(Nuclear.gold)
+                        }
+                        Text("Différence du total calculé par le moteur XP existant. Aucun bonus ajouté par ce débrief.")
+                            .font(.caption2).foregroundStyle(Nuclear.muted)
+                    }
+                    SectionCaption(title: "Performance et records")
+                    NuclearCard {
+                        if report.records.isEmpty {
+                            Label("Aucun nouveau record de charge pour cette séance", systemImage: "checkmark.circle")
+                                .font(.caption).foregroundStyle(Nuclear.paleGold)
+                        } else {
+                            Label("\(report.records.count) RECORD(S) DÉTECTÉ(S)", systemImage: "trophy.fill")
+                                .font(.headline.bold()).foregroundStyle(Nuclear.gold)
+                            ForEach(report.records, id: \.self) { record in
+                                Text("⚡ \(record)").font(.subheadline).foregroundStyle(Nuclear.paleGold)
+                            }
+                        }
+                        ForEach(report.workout.exercises) { exercise in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(exercise.name).font(.subheadline.bold()).foregroundStyle(.white)
+                                Text(exercise.sets.map {
+                                    "\($0.reps) × \(BiluxFormat.number($0.weight, digits: 1)) kg"
+                                }.joined(separator: " · "))
+                                    .font(.caption2).foregroundStyle(Nuclear.muted)
+                            }.padding(.vertical, 3)
+                        }
+                    }
+                    SectionCaption(title: "Impact sur les Gardiens")
+                    ForEach(report.guardians) { guardian in
+                        NuclearCard {
+                            HStack(alignment: .center) {
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(guardian.title).font(.subheadline.bold()).foregroundStyle(Nuclear.paleGold)
+                                    Text(guardian.addedDays > 0
+                                         ? "+\(guardian.addedDays) journée éligible"
+                                         : "Aucune nouvelle journée comptabilisée")
+                                        .font(.caption).foregroundStyle(guardian.addedDays > 0 ? Nuclear.gold : Nuclear.muted)
+                                }
+                                Spacer(minLength: 4)
+                                Text("\(min(guardian.after, guardian.target))/\(guardian.target)")
+                                    .font(.caption.monospacedDigit()).foregroundStyle(Nuclear.gold)
+                            }
+                            ProgressView(value: guardian.currentProgress).tint(Nuclear.purple)
+                        }
+                    }
+                    SectionCaption(title: "Campagne Eternal Forge")
+                    NuclearCard {
+                        if let campaign = report.campaign {
+                            Text(campaign.title).font(.subheadline.bold()).foregroundStyle(Nuclear.paleGold)
+                            Text(campaign.addedDays > 0
+                                 ? "-\(campaign.damage) PV infligés au Réacteur du Néant"
+                                 : "Aucun nouveau dégât comptabilisé pour cette séance")
+                                .font(.subheadline.weight(.semibold))
+                                .foregroundStyle(campaign.addedDays > 0 ? Nuclear.gold : Nuclear.muted)
+                            ProgressView(value: Double(min(12, campaign.after)), total: 12)
+                                .tint(Nuclear.purple)
+                            Text("\(min(12, campaign.after))/12 journées · \(campaign.remainingHP) PV restants")
+                                .font(.caption).foregroundStyle(Nuclear.muted)
+                        } else {
+                            Text("Pas de progression de campagne associée à cette séance.")
+                                .font(.subheadline).foregroundStyle(Nuclear.muted)
+                        }
+                        if let note = report.campaignNote {
+                            Text(note).font(.caption2).foregroundStyle(Nuclear.purple)
+                        }
+                    }
+                    Text("Bilan instantané au moment de l’enregistrement. Tes séances restent sauvegardées dans le journal BILUX ; ce débrief ne crée ni nouvelle séance ni nouvelle récompense.")
+                        .font(.caption2).foregroundStyle(Nuclear.muted)
+                    Button("RETOUR À LA FORGE") { dismiss() }
+                        .frame(maxWidth: .infinity, minHeight: 45)
+                        .buttonStyle(.borderedProminent).tint(Nuclear.gold)
+                        .padding(.bottom, 10)
+                }
+                .padding(16)
+            }
+            .background(Nuclear.background.ignoresSafeArea())
+            .navigationTitle("Bilan de séance")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { Button("Fermer") { dismiss() } }
+            }
+        }
+        .onAppear {
+            guard effectsEnabled && !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 2.1).repeatForever(autoreverses: true)) {
+                energyPulse = true
+            }
+        }
     }
 }
