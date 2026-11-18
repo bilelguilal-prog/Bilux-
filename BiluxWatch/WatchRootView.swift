@@ -290,6 +290,7 @@ struct WatchRootView: View {
             V54WatchWorkoutView().tag(4)
             V61LiveWorkoutView().tag(5)
             V68WatchMasteryPage().tag(6)
+            V76WatchForge().tag(7)
         }
         .tabViewStyle(.verticalPage)
         .background {
@@ -843,6 +844,35 @@ private final class V61NuclearLive: NSObject, ObservableObject, HKWorkoutSession
     private var didFinish = false
     private var closingCollection = false
 
+
+    @Published private(set) var forgeDraft: V76ForgeDraft?
+    private var forgeRestTask: Task<Void, Never>?
+    func setForgeWeight(_ value: Double) { if value.isFinite, (0...1000).contains(value), phase == .running { forgeDraft?.weight = value } }
+    func setForgeReps(_ value: Double) { if value.isFinite, (1...100).contains(value), phase == .running { forgeDraft?.reps = value.rounded() } }
+    func confirmForgeSet(restSeconds: Int) {
+        guard phase == .running, var draft = forgeDraft, draft.restUntil == nil else { return }
+        let before = draft.count
+        draft.confirm()
+        guard draft.count > before else { return }
+        WKInterfaceDevice.current().play(.click)
+        if draft.current != nil {
+            let seconds = min(300, max(30, restSeconds))
+            draft.restUntil = Date().addingTimeInterval(Double(seconds))
+            forgeRestTask?.cancel()
+            forgeRestTask = Task { @MainActor [weak self] in
+                do { try await Task.sleep(nanoseconds: UInt64(seconds) * 1_000_000_000) } catch { return }
+                guard let self, self.forgeDraft?.restUntil != nil else { return }
+                self.forgeDraft?.restUntil = nil
+                WKInterfaceDevice.current().play(.notification)
+            }
+        }
+        forgeDraft = draft
+    }
+    func stopForgeRest() {
+        forgeRestTask?.cancel(); forgeRestTask = nil
+        forgeDraft?.restUntil = nil
+    }
+
     var inProgress: Bool { phase == .requesting || phase == .starting || phase == .running || phase == .paused || phase == .finishing }
 
     func elapsed(at date: Date = .now) -> Int {
@@ -852,7 +882,7 @@ private final class V61NuclearLive: NSObject, ObservableObject, HKWorkoutSession
     }
 
     func start(mode: V61LiveMode, bridge: WatchBridge,
-               referenceMaxBPM: Int, enableHaptics: Bool) async {
+               referenceMaxBPM: Int, enableHaptics: Bool, forgeDay: V76PlanDay? = nil) async {
         guard !inProgress else { return }
         guard HKHealthStore.isHealthDataAvailable() else {
             phase = .failed
@@ -860,6 +890,7 @@ private final class V61NuclearLive: NSObject, ObservableObject, HKWorkoutSession
             return
         }
         self.bridge = bridge
+        if let day = forgeDay { forgeDraft = V76ForgeDraft(day: day) } else { forgeDraft = nil }
         phase = .requesting
         message = "Autorisation Apple Santé…"
         do {
@@ -869,6 +900,7 @@ private final class V61NuclearLive: NSObject, ObservableObject, HKWorkoutSession
             ]
             let share: Set<HKSampleType> = [HKObjectType.workoutType()]
             try await store.requestAuthorization(toShare: share, read: read)
+            guard phase == .requesting else { return }
             // La demande d'autorisation ne garantit pas l'accès ; les mesures peuvent rester absentes.
             let config = HKWorkoutConfiguration()
             config.activityType = mode.healthType
@@ -938,12 +970,17 @@ private final class V61NuclearLive: NSObject, ObservableObject, HKWorkoutSession
 
     func finish() {
         guard phase == .running || phase == .paused, !didFinish else { return }
+        if let draft = forgeDraft, !draft.payload.valid {
+            message = "Valide au moins une série réellement effectuée dans Forge Live."
+            return
+        }
         let seconds = elapsed()
         guard seconds >= 60 else {
             message = "Une minute effective minimum pour consigner dans BILUX. Tu peux aussi annuler."
             return
         }
         guard session != nil, builder != nil else { return }
+        stopForgeRest()
         didFinish = true
         finishDuration = seconds
         phase = .finishing
@@ -979,7 +1016,7 @@ private final class V61NuclearLive: NSObject, ObservableObject, HKWorkoutSession
                         averageBPM: self.averageBPM, peakBPM: self.peakBPM,
                         zoneSeconds: self.zoneSeconds,
                         referenceMaxBPM: self.maxReferenceBPM,
-                        sampleCount: self.heartSamples
+                        sampleCount: self.heartSamples, forgePayload: self.forgeDraft?.payload
                     )
                     self.clearReferences()
                     self.phase = .saved
@@ -999,6 +1036,8 @@ private final class V61NuclearLive: NSObject, ObservableObject, HKWorkoutSession
     }
 
     private func clearReferences() {
+        stopForgeRest()
+        forgeDraft = nil
         session?.delegate = nil
         builder?.delegate = nil
         session = nil
@@ -1316,10 +1355,12 @@ private struct V68WatchDashboard: View {
                         .font(.system(size: 19, weight: .black, design: .rounded))
                         .tracking(2)
                     Spacer(minLength: 2)
-                    Text("WATCH 4.1")
+                    Text("WATCH 5.0")
                         .font(.system(size: 8, weight: .heavy, design: .rounded))
                         .foregroundStyle(V54ReactorTheme.paleGold)
                 }
+
+                V76WatchTreatment()
 
                 V54ReactorCard(accent: V54ReactorTheme.gold) {
                     HStack(alignment: .center, spacing: 10) {
@@ -1378,6 +1419,10 @@ private struct V68WatchDashboard: View {
                         }
                     }
                 }
+
+                Button { selectedPage = 7 } label: {
+                    Label("FORGE LIVE", systemImage: "dumbbell.fill").font(.caption.bold()).frame(maxWidth: .infinity)
+                }.buttonStyle(.borderedProminent).tint(V54ReactorTheme.gold)
 
                 // Quêtes uniquement depuis le résumé Watch envoyé par l'iPhone.
                 V54ReactorCard(accent: V54ReactorTheme.purple) {
@@ -1740,5 +1785,181 @@ private struct V69WatchGuardiansPage: View {
                     .foregroundStyle(V54ReactorTheme.secondary)
             }
         }
+    }
+}
+// MARK: - V7.6 · Forge Live, un seul moteur HealthKit.
+private struct V76ForgeDraft {
+    let day: V76PlanDay
+    var actual: [V76ActualExercise] = []
+    var index = 0
+    var weight: Double
+    var reps: Double
+    var restUntil: Date?
+    init(day: V76PlanDay) {
+        self.day = day
+        let first = day.exercises.first
+        weight = first?.weight ?? 0
+        reps = Double(first?.reps ?? 1)
+    }
+    var current: V76Target? { day.exercises.indices.contains(index) ? day.exercises[index] : nil }
+    var count: Int { actual.reduce(0) { $0 + $1.sets.count } }
+    var currentCount: Int { current.flatMap { target in actual.first { $0.id == target.id }?.sets.count } ?? 0 }
+    var payload: V76ForgePayload { V76ForgePayload(planID: day.planID, dayID: day.id, exercises: actual) }
+    mutating func confirm() {
+        guard let target = current, currentCount < target.sets, weight.isFinite, reps.isFinite,
+            (0...1000).contains(weight), (1...100).contains(reps) else { return }
+        let set = V76ActualSet(id: UUID(), reps: Int(reps.rounded()), weight: weight)
+        if let i = actual.firstIndex(where: { $0.id == target.id }) { actual[i].sets.append(set) }
+        else { actual.append(V76ActualExercise(id: target.id, name: target.name, sets: [set])) }
+        if currentCount >= target.sets {
+            index += 1
+            if let next = current { weight = next.weight; reps = Double(next.reps) }
+        }
+    }
+}
+
+@MainActor
+private struct V76WatchTreatment: View {
+    @EnvironmentObject private var bridge: WatchBridge
+    @State private var undo = false
+    @State private var undoDay = ""
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 30)) { tick in
+            let day = V76TreatmentRecord.today(tick.date)
+            let row = bridge.treatmentRecords.first { $0.day == day }
+            let confirmed = row?.confirmed == true
+            let pending = bridge.pendingTreatment.contains { $0.day == day }
+            V54ReactorCard(accent: V54ReactorTheme.gold) {
+                Button {
+                    guard day == V76TreatmentRecord.today() else { return }
+                    if confirmed { undoDay = day; undo = true } else { bridge.setTreatment(true) }
+                } label: {
+                    Label(confirmed ? "PRISE CONFIRMÉE" : "CONFIRMER LA PRISE", systemImage: confirmed ? "checkmark.circle.fill" : "pill.fill")
+                        .font(.system(size: 11, weight: .heavy)).frame(maxWidth: .infinity)
+                }.buttonStyle(.borderedProminent).tint(confirmed ? Color.green : V54ReactorTheme.gold)
+                if confirmed, let row {
+                    Text(row.changedAt.formatted(date: .omitted, time: .shortened) + " · Toucher pour corriger")
+                        .font(.system(size: 10)).foregroundStyle(V54ReactorTheme.secondary)
+                } else {
+                    Text("Non confirmée ici. Ne pas en déduire qu'il faut reprendre une dose.")
+                        .font(.system(size: 10)).foregroundStyle(V54ReactorTheme.secondary)
+                }
+                Text(pending ? "Enregistré · synchro iPhone en attente" : "Dernier état local · synchro dès que possible")
+                    .font(.system(size: 9)).foregroundStyle(V54ReactorTheme.secondary)
+            }
+        }
+        .confirmationDialog("Annuler la confirmation du jour ?", isPresented: $undo, titleVisibility: .visible) {
+            Button("Annuler la confirmation", role: .destructive) {
+                if undoDay == V76TreatmentRecord.today() { bridge.setTreatment(false) }
+            }
+            Button("Conserver", role: .cancel) { }
+        }
+    }
+}
+
+@MainActor
+private struct V76WatchForge: View {
+    @EnvironmentObject private var bridge: WatchBridge
+    @StateObject private var live = V61NuclearLive.shared
+    @AppStorage("bilux.watch.live.maxReferenceBPM") private var reference = 190
+    @AppStorage("bilux.watch.live.zoneHaptics") private var zoneHaptics = false
+    @AppStorage("bilux.v76.rest.seconds") private var restSeconds = 90
+    @State private var cancelConfirm = false
+    @State private var finishConfirm = false
+    private enum CrownField: Hashable { case weight, reps }
+    @FocusState private var crownField: CrownField?
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 9) {
+                V54ReactorTitle(text: "FORGE LIVE · 5.0", symbol: "dumbbell.fill")
+                if let draft = live.forgeDraft, live.inProgress {
+                    active(draft)
+                } else if live.inProgress {
+                    Text("Une séance Nuclear Live est déjà en cours. Termine-la dans LIVE avant de lancer un programme.").font(.caption2)
+                } else {
+                    if let message = live.message { Text(message).font(.caption2).foregroundStyle(V54ReactorTheme.secondary) }
+                    Button { bridge.refresh() } label: { Label("ACTUALISER LES PROGRAMMES", systemImage: "arrow.clockwise").font(.caption2.bold()) }
+                    if (bridge.snapshot.forgeDays ?? []).isEmpty {
+                        Text("Crée un programme dans Eternal Forge sur l'iPhone, puis synchronise la montre.").font(.caption2)
+                    }
+                    if let total = bridge.snapshot.forgeDayCount, total > (bridge.snapshot.forgeDays ?? []).count {
+                        Text("20 premières journées actives affichées sur la montre. Les autres restent disponibles sur iPhone.").font(.caption2)
+                    }
+                    Stepper(value: $restSeconds, in: 30...300, step: 15) { Text("Repos : \(restSeconds) s").font(.caption2) }
+                    ForEach(bridge.snapshot.forgeDays ?? []) { day in
+                        V54ReactorCard(accent: V54ReactorTheme.purple) {
+                            Text(day.planName).font(.caption2).foregroundStyle(V54ReactorTheme.secondary)
+                            Text(day.title).font(.headline)
+                            Text("\(day.exercises.count) exercices").font(.caption2)
+                            Button {
+                                Task { await live.start(mode: .strength, bridge: bridge, referenceMaxBPM: reference, enableHaptics: zoneHaptics, forgeDay: day) }
+                            } label: { Label("DÉMARRER", systemImage: "play.fill").font(.caption.bold()) }
+                                .buttonStyle(.borderedProminent).tint(V54ReactorTheme.gold)
+                        }
+                    }
+                }
+            }.padding(.horizontal, 5)
+        }
+        .onAppear { bridge.refresh() }
+        .confirmationDialog("Terminer et enregistrer les séries validées ?", isPresented: $finishConfirm, titleVisibility: .visible) {
+            Button("Enregistrer") { live.finish() }
+            Button("Continuer", role: .cancel) { }
+        }
+        .confirmationDialog("Abandonner la séance sans rien enregistrer ?", isPresented: $cancelConfirm, titleVisibility: .visible) {
+            Button("Abandonner", role: .destructive) { live.cancel() }
+            Button("Continuer", role: .cancel) { }
+        }
+    }
+    @ViewBuilder private func active(_ draft: V76ForgeDraft) -> some View {
+        V54ReactorCard(accent: V54ReactorTheme.gold) {
+            Text(draft.day.title).font(.headline)
+            TimelineView(.periodic(from: .now, by: 1)) { tick in
+                let seconds = live.elapsed(at: tick.date)
+                Text(String(format: "%02d:%02d", seconds / 60, seconds % 60)).font(.title3.bold()).monospacedDigit()
+                if let until = draft.restUntil {
+                    Text("REPOS · \(max(0, Int(ceil(until.timeIntervalSince(tick.date))))) s")
+                        .font(.caption.bold()).foregroundStyle(V54ReactorTheme.paleGold)
+                }
+            }
+            Text("\(live.bpm.map { Int($0.rounded()).description } ?? "—") BPM · \(live.activeKcal.map { Int($0.rounded()).description } ?? "—") kcal")
+                .font(.caption2.monospacedDigit())
+            if let zone = live.cardiacZone { Text("ZONE Z\(zone)").font(.caption2).foregroundStyle(V54ReactorTheme.purple) }
+            if let message = live.message { Text(message).font(.caption2) }
+        }
+        if let target = draft.current {
+            V54ReactorCard(accent: V54ReactorTheme.purple) {
+                Text("EXERCICE \(draft.index + 1)/\(draft.day.exercises.count)").font(.caption2.bold())
+                Text(target.name).font(.headline)
+                Text("SÉRIE \(draft.currentCount + 1)/\(target.sets)").font(.caption2.bold()).foregroundStyle(V54ReactorTheme.gold)
+                Text("\(draft.weight.formatted(.number.precision(.fractionLength(0...1)))) kg")
+                    .font(.title3.bold()).monospacedDigit()
+                    .focusable(true)
+                    .focused($crownField, equals: .weight)
+                    .onTapGesture { crownField = .weight }
+                    .digitalCrownRotation(Binding(get: { live.forgeDraft?.weight ?? 0 }, set: { live.setForgeWeight($0) }), from: 0, through: 1000, by: 0.5, sensitivity: .medium, isContinuous: false, isHapticFeedbackEnabled: true)
+                    .accessibilityLabel("Charge en kilogrammes")
+                Text("\(Int(draft.reps)) répétitions")
+                    .font(.headline).monospacedDigit()
+                    .focusable(true)
+                    .focused($crownField, equals: .reps)
+                    .onTapGesture { crownField = .reps }
+                    .digitalCrownRotation(Binding(get: { live.forgeDraft?.reps ?? 1 }, set: { live.setForgeReps($0) }), from: 1, through: 100, by: 1, sensitivity: .medium, isContinuous: false, isHapticFeedbackEnabled: true)
+                    .accessibilityLabel("Répétitions")
+                Text("Sélectionne kg ou répétitions, puis tourne la Crown.").font(.system(size: 9)).foregroundStyle(V54ReactorTheme.secondary)
+                if draft.restUntil != nil {
+                    Button("PASSER LE REPOS") { live.stopForgeRest() }.font(.caption2)
+                }
+                Button { live.confirmForgeSet(restSeconds: restSeconds) } label: { Label("VALIDER LA SÉRIE", systemImage: "checkmark.circle.fill").font(.caption.bold()) }
+                    .buttonStyle(.borderedProminent).tint(V54ReactorTheme.gold)
+                    .disabled(live.phase != .running || draft.restUntil != nil)
+            }
+        } else {
+            Text("PROGRAMME TERMINÉ · \(draft.count) séries validées").font(.headline).foregroundStyle(V54ReactorTheme.gold)
+        }
+        if live.phase == .running || live.phase == .paused {
+            Button(live.phase == .paused ? "REPRENDRE" : "PAUSE") { live.pauseOrResume() }.buttonStyle(.bordered)
+            Button("TERMINER") { finishConfirm = true }.buttonStyle(.borderedProminent).tint(V54ReactorTheme.purple).disabled(draft.count == 0)
+        }
+        if live.phase != .finishing { Button("ANNULER", role: .destructive) { cancelConfirm = true }.font(.caption2) }
     }
 }

@@ -1592,6 +1592,7 @@ struct HealthScreen: View {
                     Button { Task { await health.connect() } } label: {
                         Label("GÉRER L'ACCÈS APPLE SANTÉ", systemImage: "heart.text.square")
                     }.buttonStyle(.borderedProminent).tint(Nuclear.gold)
+                    V76TreatmentHistory()
                     SectionCaption(title: "Journal post-thyroïdectomie")
                     NuclearCard {
                         Text("Consigne ton énergie, la fatigue, le sommeil et tes résultats TSH/T4L. Les valeurs restent des observations personnelles et ne servent pas à adapter ton traitement.")
@@ -3883,6 +3884,7 @@ private struct V70RebirthCommandDeck: View {
                     .font(.system(size: 24, weight: .medium)).foregroundStyle(Nuclear.gold)
                     .accessibilityHidden(true)
             }
+            V76TreatmentCard()
             V73EternalForgeEntry().environmentObject(journal)
             V72AwakeningEntry().environmentObject(journal)
             HStack(spacing: 9) {
@@ -6548,5 +6550,119 @@ private struct V75WeeklyChroniclesView: View {
         .navigationBarTitleDisplayMode(.inline)
         .modifier(PageBackground())
         .accessibilityIdentifier("bilux.v75.weekly.chronicles")
+    }
+}
+// MARK: - V7.6 — Programme Watch et suivi du traitement.
+@MainActor
+func V76AvailablePlanDays() -> [V76PlanDay] {
+    guard let ledger = try? V73LedgerStore.load() else { return [] }
+    return ledger.plans.filter { !$0.archived }.flatMap { plan in
+        plan.days.filter { !$0.exercises.isEmpty }.map { day in
+            V76PlanDay(planID: plan.id, id: day.id, planName: plan.title, title: day.title,
+                exercises: day.exercises.map { V76Target(id: $0.id, name: $0.name, sets: $0.sets, reps: $0.reps, weight: $0.weight) })
+        }
+    }
+}
+@MainActor
+func V76LinkWatchWorkout(_ payload: V76ForgePayload, workout: WorkoutSession) {
+    guard let ledger = try? V73LedgerStore.load(),
+          let plan = ledger.plans.first(where: { $0.id == payload.planID }),
+          let day = plan.days.first(where: { $0.id == payload.dayID }) else { return }
+    // The existing campaign engine validates the actual completed exercises and duration.
+    do {
+        try V73LedgerStore.link(V73ForgeLaunch(planID: plan.id, dayID: day.id, planName: plan.title, day: day), to: workout)
+    } catch { /* The actual workout is already saved. Never add it a second time. */ }
+}
+
+@MainActor
+private struct V76TreatmentCard: View {
+    @ObservedObject private var bridge = WatchPhoneBridge.shared
+    @State private var undo = false
+    @State private var undoDay = ""
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 30)) { tick in
+            let day = V76TreatmentRecord.today(tick.date)
+            let row = bridge.treatmentRecords.first { $0.day == day }
+            let confirmed = row?.confirmed == true
+            NuclearCard {
+                Label("TRAITEMENT QUOTIDIEN", systemImage: "pill.fill")
+                    .font(.caption.bold()).foregroundStyle(Nuclear.gold)
+                Button {
+                    guard day == V76TreatmentRecord.today() else { return }
+                    if confirmed { undoDay = day; undo = true } else { bridge.setTreatment(true) }
+                } label: {
+                    Label(confirmed ? "PRISE CONFIRMÉE" : "CONFIRMER MA PRISE", systemImage: confirmed ? "checkmark.circle.fill" : "pill")
+                        .font(.subheadline.bold()).frame(maxWidth: .infinity, minHeight: 38)
+                }.buttonStyle(.borderedProminent).tint(confirmed ? Color.green : Nuclear.gold)
+                if confirmed, let row {
+                    Text("Confirmée à \(row.changedAt.formatted(date: .omitted, time: .shortened)) · enregistrée ici. Toucher pour corriger.")
+                        .font(.caption2).foregroundStyle(Nuclear.muted)
+                } else {
+                    Text("Pas de confirmation enregistrée ici pour aujourd'hui. Ce n'est pas une indication de reprendre une dose.")
+                        .font(.caption2).foregroundStyle(Nuclear.muted)
+                }
+                Text("Synchronisation avec la Watch dès que possible. Confirmation déclarative, pas une preuve de prise.")
+                    .font(.caption2).foregroundStyle(Nuclear.muted)
+            }
+        }
+        .confirmationDialog("Annuler la confirmation d'aujourd'hui ?", isPresented: $undo, titleVisibility: .visible) {
+            Button("Annuler la confirmation", role: .destructive) {
+                if undoDay == V76TreatmentRecord.today() { bridge.setTreatment(false) }
+            }
+            Button("Conserver", role: .cancel) { }
+        }
+    }
+}
+@MainActor
+private struct V76TreatmentHistory: View {
+    @ObservedObject private var bridge = WatchPhoneBridge.shared
+    @State private var exportURL: URL?
+    @State private var importing = false
+    @State private var feedback: String?
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SectionCaption(title: "Traitement · historique")
+            V76TreatmentCard()
+            NuclearCard {
+                Button("PRÉPARER UNE SAUVEGARDE PRIVÉE") {
+                    do { exportURL = try bridge.exportTreatment() }
+                    catch { feedback = error.localizedDescription }
+                }.font(.caption.bold())
+                if let exportURL {
+                    ShareLink(item: exportURL) { Label("EXPORTER LE JSON TRAITEMENT", systemImage: "square.and.arrow.up") }
+                        .font(.caption.bold())
+                }
+                Button("IMPORTER UNE SAUVEGARDE TRAITEMENT") { importing = true }.font(.caption.bold())
+                Text("Historique distinct du journal BILUX. Ne partage pas ce fichier sur GitHub.")
+                    .font(.caption2).foregroundStyle(Nuclear.muted)
+                if bridge.treatmentRecords.isEmpty {
+                    Text("Aucune confirmation enregistrée.").font(.caption).foregroundStyle(Nuclear.muted)
+                }
+                ForEach(bridge.treatmentRecords) { row in
+                    HStack {
+                        Image(systemName: row.confirmed ? "checkmark.circle.fill" : "arrow.uturn.backward.circle")
+                            .foregroundStyle(row.confirmed ? Color.green : Nuclear.muted)
+                        VStack(alignment: .leading) {
+                            Text(row.day).font(.caption.bold())
+                            Text(row.confirmed ? "Confirmée \(row.changedAt.formatted(date: .omitted, time: .shortened))" : "Confirmation annulée")
+                                .font(.caption2).foregroundStyle(Nuclear.muted)
+                        }
+                        Spacer()
+                    }
+                }
+            }
+        }
+        .fileImporter(isPresented: $importing, allowedContentTypes: [.json], allowsMultipleSelection: false) { result in
+            do {
+                guard let url = try result.get().first else { return }
+                try bridge.importTreatment(url)
+                exportURL = nil
+                feedback = "Historique fusionné sans dupliquer les journées."
+            } catch { feedback = error.localizedDescription }
+        }
+        .alert("Traitement", isPresented: Binding(get: { feedback != nil }, set: { if !$0 { feedback = nil } })) {
+            Button("OK") { feedback = nil }
+        } message: { Text(feedback ?? "") }
+        .onChange(of: bridge.treatmentRecords) { _, _ in exportURL = nil }
     }
 }

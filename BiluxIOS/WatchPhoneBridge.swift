@@ -5,7 +5,7 @@ import WatchConnectivity
 /// Synchronise des résumés vers la montre sans transférer les données médicales sensibles.
 /// Les séances saisies sur la montre sont journalisées localement sur l'iPhone une seule fois.
 @MainActor
-final class WatchPhoneBridge: NSObject, WCSessionDelegate {
+final class WatchPhoneBridge: NSObject, ObservableObject, WCSessionDelegate {
     static let shared = WatchPhoneBridge()
 
     private var journal: BiluxStore?
@@ -16,6 +16,69 @@ final class WatchPhoneBridge: NSObject, WCSessionDelegate {
 
     private override init() { super.init() }
 
+    // V7.6: journal de confirmation minimal, distinct des bilans Santé et des XP.
+    @Published private(set) var treatmentRecords = V76TreatmentRecord.load("bilux.v76.treatment.phone")
+    func setTreatment(_ confirmed: Bool) {
+        let now = Date()
+        let day = V76TreatmentRecord.today(now)
+        guard (treatmentRecords.first { $0.day == day }?.confirmed ?? false) != confirmed else { return }
+        let row = V76TreatmentRecord(day: day, confirmed: confirmed, changedAt: now, revision: UUID())
+        mergeTreatment(row)
+    }
+    func exportTreatment() throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("BILUX-Traitement-\(UUID().uuidString).json")
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(treatmentRecords).write(to: url, options: [.atomic, .completeFileProtection])
+        return url
+    }
+    func importTreatment(_ url: URL) throws {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        let raw = try Data(contentsOf: url)
+        guard raw.count <= 2_000_000 else { throw CocoaError(.fileReadCorruptFile) }
+        let rows = try JSONDecoder().decode([V76TreatmentRecord].self, from: raw)
+        guard rows.count <= 10_000, rows.allSatisfy({ $0.valid }) else { throw CocoaError(.fileReadCorruptFile) }
+        mergeTreatmentRows(rows)
+    }
+    private func mergeTreatment(_ row: V76TreatmentRecord) {
+        guard row.valid else { return }
+        mergeTreatmentRows([row])
+    }
+    private func mergeTreatmentRows(_ rows: [V76TreatmentRecord]) {
+        var merged = treatmentRecords
+        V76TreatmentRecord.merge(rows, into: &merged)
+        if merged != treatmentRecords {
+            V76TreatmentRecord.save(merged, "bilux.v76.treatment.phone")
+            treatmentRecords = merged
+        }
+        sendSnapshot()
+        // A direct message is opportunistic; application context remains the durable latest state.
+        if WCSession.isSupported(), activated, WCSession.default.isReachable,
+           let data = encodedSnapshot() {
+            WCSession.default.sendMessage(["biluxSnapshot": data], replyHandler: nil, errorHandler: { _ in })
+        }
+    }
+    private func encodedSnapshot() -> Data? {
+        var enriched = snapshot
+        enriched.updatedAt = Date()
+        // Limit plan snapshots to a modest payload; the full plan library remains on iPhone.
+        let days = V76AvailablePlanDays()
+        enriched.forgeDays = Array(days.prefix(20))
+        enriched.forgeDayCount = days.count
+        enriched.treatmentRecords = Array(treatmentRecords.prefix(366))
+        return try? JSONEncoder().encode(enriched)
+    }
+    private func receiveV76Event(_ message: [String: Any]) -> Bool {
+        guard message["type"] as? String == "v76Treatment" else { return false }
+        if let data = message["record"] as? Data, data.count <= 2048,
+           let row = try? JSONDecoder().decode(V76TreatmentRecord.self, from: data) {
+            mergeTreatment(row)
+        }
+        return true
+    }
+
+
     func configure(journal: BiluxStore, health: HealthKitManager) {
         self.journal = journal
         subscriptions.removeAll()
@@ -24,6 +87,10 @@ final class WatchPhoneBridge: NSObject, WCSessionDelegate {
             .sink { [weak self] data, summary in
                 self?.updateSnapshot(data: data, health: summary)
             }
+            .store(in: &subscriptions)
+        NotificationCenter.default.publisher(for: Notification.Name("bilux.v73.eternalforge.changed"))
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.sendSnapshot() }
             .store(in: &subscriptions)
         if WCSession.isSupported() {
             WCSession.default.delegate = self
@@ -83,7 +150,7 @@ final class WatchPhoneBridge: NSObject, WCSessionDelegate {
         guard WCSession.isSupported(), activated,
               WCSession.default.isPaired,
               WCSession.default.isWatchAppInstalled,
-              let payload = try? JSONEncoder().encode(snapshot) else { return }
+              let payload = encodedSnapshot() else { return }
         // Dernier état uniquement : ne crée pas de file d'attente médicale.
         try? WCSession.default.updateApplicationContext(["biluxSnapshot": payload])
     }
@@ -96,7 +163,14 @@ final class WatchPhoneBridge: NSObject, WCSessionDelegate {
               let duration = message["durationMinutes"] as? Int,
               (1...240).contains(duration),
               let startedAt = message["startedAt"] as? Double else { return }
-        guard !journal.data.workouts.contains(where: { $0.id == id }) else { return }
+        let forge = (message["forgePayload"] as? Data).flatMap { raw -> V76ForgePayload? in
+            guard raw.count <= 100_000, let parsed = try? JSONDecoder().decode(V76ForgePayload.self, from: raw), parsed.valid else { return nil }
+            return parsed
+        }
+        if let old = journal.data.workouts.first(where: { $0.id == id }) {
+            if let forge { V76LinkWatchWorkout(forge, workout: old) }
+            return
+        }
         guard abs(Date().timeIntervalSince1970 - startedAt) < 7 * 86_400 else { return }
         // Séance manuelle : pas d'écriture HealthKit et pas de doublon avec l'app Exercices.
         // BILUX V5.4 : catégorie validée, repli compatible avec les anciennes Watch.
@@ -119,6 +193,13 @@ final class WatchPhoneBridge: NSObject, WCSessionDelegate {
             activity: activity, durationMinutes: duration,
             notes: note, exercises: []
         )
+        if let forge, isLive {
+            entry.exercises = forge.exercises.map { exercise in
+                WorkoutExercise(name: exercise.name, sets: exercise.sets.map { set in
+                    WorkoutSet(id: set.id, reps: set.reps, weight: set.weight)
+                })
+            }
+        }
         if isLive {
             let count = max(0, min(25_000, message["sampleCount"] as? Int ?? 0))
             let mean = (message["averageBPM"] as? Int).flatMap { (35...240).contains($0) ? $0 : nil }
@@ -132,6 +213,7 @@ final class WatchPhoneBridge: NSObject, WCSessionDelegate {
                                                   referenceMaxBPM: ref, sampleCount: count)
         }
         journal.add(entry)
+        if let forge, isLive { V76LinkWatchWorkout(forge, workout: entry) }
     }
 
     nonisolated func session(_ session: WCSession, activationDidCompleteWith state: WCSessionActivationState, error: Error?) {
@@ -147,13 +229,16 @@ final class WatchPhoneBridge: NSObject, WCSessionDelegate {
     nonisolated func sessionDidDeactivate(_ session: WCSession) { session.activate() }
 
     nonisolated func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any] = [:]) {
-        Task { @MainActor in receiveWorkout(userInfo) }
+        Task { @MainActor in
+            if !receiveV76Event(userInfo) { receiveWorkout(userInfo) }
+        }
     }
     nonisolated func session(_ session: WCSession, didReceiveMessage message: [String: Any], replyHandler: @escaping ([String: Any]) -> Void) {
         Task { @MainActor in
             if message["type"] == nil { replyHandler([:]); return }
-            if message["type"] as? String == "requestSnapshot",
-               let data = try? JSONEncoder().encode(snapshot) {
+            let handled = receiveV76Event(message)
+            if (handled || message["type"] as? String == "requestSnapshot"),
+               let data = encodedSnapshot() {
                 replyHandler(["biluxSnapshot": data])
             } else { replyHandler([:]) }
         }
