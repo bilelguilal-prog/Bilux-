@@ -3921,6 +3921,16 @@ private struct V70RebirthCommandDeck: View {
                 .accessibilityIdentifier("bilux.v70.analytics.home")
 
                 NavigationLink {
+                    V75WeeklyChroniclesView().environmentObject(journal)
+                } label: {
+                    Label("CHRONIQUES HEBDOMADAIRES", systemImage: "calendar.badge.clock")
+                        .font(.subheadline.weight(.heavy))
+                        .frame(maxWidth: .infinity, minHeight: 42)
+                }
+                .buttonStyle(.bordered).tint(Nuclear.gold)
+                .accessibilityIdentifier("bilux.v75.weekly.entry")
+
+                NavigationLink {
                     V71ExercisePerformance().environmentObject(journal)
                 } label: {
                     Label("PROGRESSION PAR EXERCICE", systemImage: "chart.line.uptrend.xyaxis")
@@ -6272,5 +6282,271 @@ private struct V74UnifiedDebrief: View {
                 energyPulse = true
             }
         }
+    }
+}
+
+// MARK: - BILUX V7.5 · NUCLEAR CHRONICLES
+// Vue hebdomadaire en lecture seule : réutilise les séances et événements déjà enregistrés.
+// Aucun XP, aucune séance, aucune date historique ou sauvegarde supplémentaire n'est créé.
+
+private struct V75ChronicleDay: Identifiable {
+    let date: Date
+    let sessionCount: Int
+    let minutes: Int
+    var id: Date { date }
+}
+
+private struct V75WeekSummary {
+    let start: Date
+    let end: Date
+    let sessions: [WorkoutSession]
+    let days: [V75ChronicleDay]
+
+    init(workouts: [WorkoutSession], offset: Int, now: Date = .now) {
+        var calendar = Calendar.current
+        calendar.firstWeekday = 2 // Lundi, même dans une locale configurée dimanche.
+        calendar.minimumDaysInFirstWeek = 4
+        let currentMonday = calendar.dateInterval(of: .weekOfYear, for: now)?.start
+            ?? calendar.startOfDay(for: now)
+        let beginning = calendar.date(byAdding: .weekOfYear, value: min(0, max(-53, offset)), to: currentMonday)
+            ?? currentMonday
+        let ending = calendar.date(byAdding: .day, value: 7, to: beginning)
+            ?? beginning.addingTimeInterval(7 * 24 * 3600)
+        let found = workouts.filter { $0.date >= beginning && $0.date < ending && $0.date <= now }
+            .sorted { left, right in
+                if left.date != right.date { return left.date > right.date }
+                return left.id.uuidString < right.id.uuidString
+            }
+        self.start = beginning
+        self.end = ending
+        self.sessions = found
+        self.days = (0..<7).compactMap { index in
+            guard let day = calendar.date(byAdding: .day, value: index, to: beginning),
+                  let nextDay = calendar.date(byAdding: .day, value: 1, to: day) else { return nil }
+            let daily = found.filter { $0.date >= day && $0.date < nextDay }
+            return V75ChronicleDay(date: day, sessionCount: daily.count,
+                                   minutes: daily.reduce(0) { $0 + max(0, min(1440, $1.durationMinutes)) })
+        }
+    }
+
+    var count: Int { sessions.count }
+    var activeDays: Int { days.filter { $0.sessionCount > 0 }.count }
+    var minutes: Int { sessions.reduce(0) { $0 + max(0, min(1440, $1.durationMinutes)) } }
+    var volume: Double {
+        sessions.reduce(0) { result, workout in
+            result + (workout.volume.isFinite ? max(0, workout.volume) : 0)
+        }
+    }
+    var isCurrentWeek: Bool {
+        start <= Date() && Date() < end
+    }
+    var lastDay: Date { Calendar.current.date(byAdding: .day, value: -1, to: end) ?? start }
+}
+
+private struct V75WeeklyChroniclesView: View {
+    @EnvironmentObject private var journal: BiluxStore
+    @State private var weekOffset = 0
+    private let french = Locale(identifier: "fr_FR")
+
+    private var week: V75WeekSummary {
+        V75WeekSummary(workouts: journal.data.workouts, offset: weekOffset)
+    }
+    private var previousWeek: V75WeekSummary {
+        V75WeekSummary(workouts: journal.data.workouts, offset: weekOffset - 1)
+    }
+    private var weekEvents: [V71AscensionEvent] {
+        let first = week.start
+        let last = week.end
+        return V71AscensionChronicle.events(journal.data).filter { $0.date >= first && $0.date < last }
+    }
+    private var recordCount: Int { weekEvents.filter { $0.kind == .record }.count }
+    private var bossCount: Int { weekEvents.filter { $0.kind == .boss }.count }
+
+    private func comparison(_ current: Int, _ previous: Int) -> String {
+        let difference = current - previous
+        return difference > 0 ? "+\(difference)" : "\(difference)"
+    }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                VStack(alignment: .leading, spacing: 5) {
+                    Text("NUCLEAR CHRONICLES · V7.5")
+                        .font(.caption2.weight(.black)).tracking(1.4)
+                        .foregroundStyle(Nuclear.purple)
+                    Text("BILAN DE LA SEMAINE")
+                        .font(.title3.weight(.black)).foregroundStyle(Nuclear.paleGold)
+                    Text("Tes exploits réels, sans objectif imposé les jours de repos.")
+                        .font(.caption).foregroundStyle(Nuclear.muted)
+                }
+
+                NuclearCard {
+                    HStack(spacing: 12) {
+                        Button {
+                            weekOffset = max(-52, weekOffset - 1)
+                        } label: {
+                            Image(systemName: "chevron.left.circle.fill")
+                                .font(.title2).foregroundStyle(Nuclear.gold)
+                        }
+                        .disabled(weekOffset <= -52)
+                        .accessibilityLabel("Semaine précédente")
+                        Spacer(minLength: 4)
+                        VStack(spacing: 3) {
+                            Text(week.start.formatted(.dateTime.day().month(.abbreviated).locale(french))
+                                + " — " + week.lastDay.formatted(.dateTime.day().month(.abbreviated).locale(french)))
+                                .font(.headline.weight(.black))
+                                .foregroundStyle(Nuclear.paleGold)
+                                .lineLimit(1).minimumScaleFactor(0.75)
+                            Text(week.isCurrentWeek ? "SEMAINE EN COURS" : "SEMAINE ARCHIVÉE")
+                                .font(.caption2.bold()).foregroundStyle(Nuclear.purple)
+                        }
+                        Spacer(minLength: 4)
+                        Button {
+                            weekOffset = min(0, weekOffset + 1)
+                        } label: {
+                            Image(systemName: "chevron.right.circle.fill")
+                                .font(.title2).foregroundStyle(Nuclear.gold)
+                        }
+                        .disabled(weekOffset >= 0)
+                        .accessibilityLabel("Semaine suivante")
+                    }
+                }
+
+                HStack(spacing: 9) {
+                    V70RebirthTile(title: "SÉANCES", value: "\(week.count)",
+                                   symbol: "dumbbell.fill", color: Nuclear.gold)
+                    V70RebirthTile(title: "JOURS ACTIFS", value: "\(week.activeDays)/7",
+                                   symbol: "calendar", color: Nuclear.purple)
+                }
+                HStack(spacing: 9) {
+                    V70RebirthTile(title: "MINUTES", value: "\(week.minutes)",
+                                   symbol: "clock.fill", color: Nuclear.purple)
+                    V70RebirthTile(title: "VOLUME (KG)", value: BiluxFormat.number(week.volume),
+                                   symbol: "scalemass.fill", color: Nuclear.gold)
+                }
+
+                SectionCaption(title: "Les sept jours du réacteur")
+                HStack(spacing: 4) {
+                    ForEach(week.days) { day in
+                        let isFuture = day.date > Calendar.current.startOfDay(for: Date())
+                        VStack(spacing: 7) {
+                            Text(day.date.formatted(.dateTime.weekday(.abbreviated).locale(french)))
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(Nuclear.muted)
+                                .lineLimit(1).minimumScaleFactor(0.7)
+                            Image(systemName: isFuture ? "ellipsis" :
+                                    (day.sessionCount > 0 ? "bolt.fill" : "moon.stars.fill"))
+                                .font(.system(size: 15, weight: .semibold))
+                                .foregroundStyle(isFuture ? Nuclear.muted :
+                                    (day.sessionCount > 0 ? Nuclear.gold : Nuclear.purple))
+                                .frame(maxWidth: .infinity, minHeight: 30)
+                                .background(Nuclear.panel, in: RoundedRectangle(cornerRadius: 9))
+                            Text(day.sessionCount > 0 ? "\(day.sessionCount)" : "—")
+                                .font(.caption2.weight(.bold))
+                                .foregroundStyle(Nuclear.paleGold)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel(day.date.formatted(.dateTime.weekday(.wide).locale(french))
+                                            + ", \(day.sessionCount) séance(s)")
+                    }
+                }
+                Text("La lune signifie simplement repos ou absence de séance consignée. Aucun malus.")
+                    .font(.caption2).foregroundStyle(Nuclear.muted)
+
+                SectionCaption(title: "Par rapport à la semaine précédente")
+                NuclearCard {
+                    HStack {
+                        Text("Séances").foregroundStyle(Nuclear.paleGold)
+                        Spacer()
+                        Text(comparison(week.count, previousWeek.count))
+                            .foregroundStyle(Nuclear.gold).monospacedDigit()
+                    }
+                    HStack {
+                        Text("Minutes").foregroundStyle(Nuclear.paleGold)
+                        Spacer()
+                        Text(comparison(week.minutes, previousWeek.minutes))
+                            .foregroundStyle(Nuclear.gold).monospacedDigit()
+                    }
+                    Text("Comparaison descriptive : une semaine en cours est comparée à une semaine passée complète.")
+                        .font(.caption2).foregroundStyle(Nuclear.muted)
+                }
+
+                SectionCaption(title: "Jalons retrouvés dans le journal")
+                NuclearCard {
+                    HStack {
+                        Label("Records", systemImage: "trophy.fill")
+                            .foregroundStyle(Nuclear.gold)
+                        Spacer()
+                        Text("\(recordCount)").foregroundStyle(Nuclear.paleGold)
+                    }
+                    HStack {
+                        Label("Boss vaincus", systemImage: "shield.fill")
+                            .foregroundStyle(Nuclear.purple)
+                        Spacer()
+                        Text("\(bossCount)").foregroundStyle(Nuclear.paleGold)
+                    }
+                    if weekEvents.isEmpty {
+                        Text("Aucun jalon datable dans cette semaine. Une semaine calme fait partie de l'ascension.")
+                            .font(.caption).foregroundStyle(Nuclear.muted)
+                    } else {
+                        ForEach(Array(weekEvents.prefix(8))) { event in
+                            VStack(alignment: .leading, spacing: 3) {
+                                Label(event.title, systemImage: event.symbol)
+                                    .font(.subheadline.bold()).foregroundStyle(Nuclear.paleGold)
+                                Text(BiluxFormat.day(event.date) + " · " + event.detail)
+                                    .font(.caption2).foregroundStyle(Nuclear.muted)
+                            }
+                            .padding(.vertical, 3)
+                        }
+                    }
+                }
+
+                SectionCaption(title: "Séances enregistrées")
+                if week.sessions.isEmpty {
+                    NuclearCard {
+                        Text("Aucune séance enregistrée pour cette semaine.")
+                            .foregroundStyle(Nuclear.paleGold)
+                        Text("Le repos ne supprime jamais tes compétences ou tes acquis.")
+                            .font(.caption).foregroundStyle(Nuclear.muted)
+                    }
+                } else {
+                    ForEach(week.sessions) { workout in
+                        NuclearCard {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(workout.activity)
+                                        .font(.subheadline.bold()).foregroundStyle(Nuclear.paleGold)
+                                    Text(BiluxFormat.day(workout.date) + " · \(workout.durationMinutes) min")
+                                        .font(.caption).foregroundStyle(Nuclear.muted)
+                                }
+                                Spacer(minLength: 4)
+                                if workout.volume.isFinite && workout.volume > 0 {
+                                    Text(BiluxFormat.number(workout.volume) + " kg")
+                                        .font(.caption.bold()).foregroundStyle(Nuclear.gold)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                NuclearCard {
+                    HStack {
+                        Image(systemName: "crown.fill").foregroundStyle(Nuclear.gold)
+                        Text("NIVEAU \(journal.heroLevel) · \(journal.rankName.uppercased())")
+                            .font(.subheadline.bold()).foregroundStyle(Nuclear.paleGold)
+                    }
+                    Text("\(journal.totalXP) XP au total aujourd'hui — pas les XP de la semaine.")
+                        .font(.caption).foregroundStyle(Nuclear.muted)
+                }
+                Text("Bilan reconstruit depuis ton journal. Les records et victoires historiques restent soumis aux mêmes règles que le Journal de l'Ascension. Rien n'est ajouté à tes XP ni à tes séances.")
+                    .font(.caption2).foregroundStyle(Nuclear.muted)
+            }
+            .padding(15)
+        }
+        .navigationTitle("Chroniques hebdomadaires")
+        .navigationBarTitleDisplayMode(.inline)
+        .modifier(PageBackground())
+        .accessibilityIdentifier("bilux.v75.weekly.chronicles")
     }
 }
