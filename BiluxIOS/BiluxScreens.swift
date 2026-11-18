@@ -1820,6 +1820,8 @@ struct AscensionScreen: View {
                     SectionCaption(title: "Effets visuels")
                     NuclearCard {
                         Toggle("Animations nucléaires", isOn: $effectsEnabled).tint(Nuclear.gold)
+                        NavigationLink("Sauvegardes · Nuclear Guardian") { V77GuardianCenter().environmentObject(journal) }
+                            .tint(Nuclear.gold)
                         Toggle("Ambiance sonore cinématique", isOn: $immersionSound)
                             .tint(Nuclear.gold)
                         Text("Sons nucléaires originaux, optionnels et désactivés par défaut. Le mode Silence de l’iPhone est respecté. Aucun son en arrière-plan.")
@@ -3884,6 +3886,12 @@ private struct V70RebirthCommandDeck: View {
                     .font(.system(size: 24, weight: .medium)).foregroundStyle(Nuclear.gold)
                     .accessibilityHidden(true)
             }
+            NavigationLink {
+                V77GuardianCenter().environmentObject(journal)
+            } label: {
+                Label("NUCLEAR GUARDIAN · SAUVEGARDES", systemImage: "shield.lefthalf.filled")
+                    .font(.subheadline.weight(.heavy)).frame(maxWidth: .infinity, minHeight: 40)
+            }.buttonStyle(.bordered).tint(Nuclear.gold)
             V76TreatmentCard()
             V73EternalForgeEntry().environmentObject(journal)
             V72AwakeningEntry().environmentObject(journal)

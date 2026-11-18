@@ -1355,7 +1355,7 @@ private struct V68WatchDashboard: View {
                         .font(.system(size: 19, weight: .black, design: .rounded))
                         .tracking(2)
                     Spacer(minLength: 2)
-                    Text("WATCH 5.0")
+                    Text("WATCH 5.1")
                         .font(.system(size: 8, weight: .heavy, design: .rounded))
                         .foregroundStyle(V54ReactorTheme.paleGold)
                 }

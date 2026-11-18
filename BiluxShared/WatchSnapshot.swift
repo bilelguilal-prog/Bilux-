@@ -54,6 +54,8 @@ struct WatchSnapshot: Codable {
     var forgeDays: [V76PlanDay]? = nil
     var forgeDayCount: Int? = nil
     var treatmentRecords: [V76TreatmentRecord]? = nil
+    // Horodatage indépendant : ne jamais avancer la date du résumé RPG.
+    var v77TreatmentSummaryAt: Date? = nil
 
     static let empty = WatchSnapshot(
         heroName: "BILUX", level: 1, rank: "SURVIVANT", totalXP: 0,

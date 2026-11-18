@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import WatchConnectivity
+import WidgetKit
 
 @MainActor
 final class WatchBridge: NSObject, ObservableObject, WCSessionDelegate {
@@ -24,6 +25,7 @@ final class WatchBridge: NSObject, ObservableObject, WCSessionDelegate {
         V76TreatmentRecord.save(local, "bilux.v76.treatment.watch")
         V76TreatmentRecord.save(pending, "bilux.v76.treatment.pending")
         treatmentRecords = local; pendingTreatment = pending
+        v77PublishFace()
         flushTreatment()
         if WCSession.isSupported(), WCSession.default.activationState == .activated, WCSession.default.isReachable,
            let encoded = try? JSONEncoder().encode(row) {
@@ -68,6 +70,7 @@ final class WatchBridge: NSObject, ObservableObject, WCSessionDelegate {
         if let data = UserDefaults.standard.data(forKey: cacheKey),
            let saved = try? JSONDecoder().decode(WatchSnapshot.self, from: data) {
             snapshot = saved
+            v77PublishFace()
         }
         guard WCSession.isSupported() else { return }
         WCSession.default.delegate = self
@@ -164,8 +167,9 @@ final class WatchBridge: NSObject, ObservableObject, WCSessionDelegate {
         if let rows = value.treatmentRecords { acceptTreatment(rows) }
         // Never replace a newer cached plan/RPG snapshot with an older direct reply.
         // Treatment merges separately, even when the snapshot itself is older.
-        guard value.updatedAt >= snapshot.updatedAt else { return }
+        guard value.updatedAt >= snapshot.updatedAt else { v77PublishFace(); return }
         snapshot = value
+        v77PublishFace()
         UserDefaults.standard.set(data, forKey: cacheKey)
         connected = true
     }
@@ -182,5 +186,59 @@ final class WatchBridge: NSObject, ObservableObject, WCSessionDelegate {
     nonisolated func session(_ session: WCSession, didReceiveApplicationContext context: [String: Any]) {
         guard let data = context["biluxSnapshot"] as? Data else { return }
         Task { @MainActor in load(data) }
+    }
+}
+// V7.7: copie minimale destinée au cadran. Aucun journal, aucun XP écrit ici.
+private struct V77FaceState: Codable, Equatable {
+    let observedAt: Date
+    let level: Int
+    let fraction: Double
+    let questsDone: Int
+    let questsTotal: Int
+    let guardiansDone: Int?
+    let treatmentDay: String
+    let treatmentConfirmed: Bool?
+    let treatmentPending: Bool
+    let treatmentObservedAt: Date?
+}
+
+@MainActor
+private extension WatchBridge {
+    func v77PublishFace() {
+        guard snapshot.updatedAt != .distantPast,
+              snapshot.updatedAt <= Date().addingTimeInterval(120),
+              (1...100).contains(snapshot.level), snapshot.xpProgress.isFinite,
+              let folder = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: "group.com.bilux.nuclearascension.watchshared") else { return }
+        let day = V76TreatmentRecord.today()
+        let pending = pendingTreatment.contains { $0.day == day }
+        // A previous local action is not equivalent to a confirmed iPhone receipt.
+        let row = treatmentRecords.first { $0.day == day }
+        let remote = snapshot.treatmentRecords?.first { $0.day == day }
+        let same = row == remote
+        let treatmentObservedAt = same && !pending && snapshot.treatmentRecords != nil ? snapshot.v77TreatmentSummaryAt : nil
+        let value = V77FaceState(observedAt: snapshot.updatedAt, level: snapshot.level,
+            fraction: min(1, max(0, snapshot.xpProgress)),
+            questsDone: snapshot.quests.filter { $0.completed }.count,
+            questsTotal: snapshot.quests.count,
+            guardiansDone: snapshot.monthlyWorkouts.map { min(12, max(0, $0)) },
+            treatmentDay: day, treatmentConfirmed: treatmentObservedAt != nil ? remote?.confirmed : nil,
+            treatmentPending: pending || !same, treatmentObservedAt: treatmentObservedAt)
+        let file = folder.appendingPathComponent("bilux-face-v77.json")
+        do {
+            let previous = (try? Data(contentsOf: file)).flatMap { try? JSONDecoder().decode(V77FaceState.self, from: $0) }
+            if previous == value { return }
+            try JSONEncoder().encode(value).write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            let key = "bilux.v77.lastFaceReload"
+            let last = UserDefaults.standard.object(forKey: key) as? Date ?? .distantPast
+            let changed = previous?.level != value.level || previous?.fraction != value.fraction ||
+                previous?.questsDone != value.questsDone || previous?.questsTotal != value.questsTotal ||
+                previous?.guardiansDone != value.guardiansDone || previous?.treatmentDay != value.treatmentDay ||
+                previous?.treatmentConfirmed != value.treatmentConfirmed || previous?.treatmentPending != value.treatmentPending
+            guard changed || Date().timeIntervalSince(last) >= 900 else { return }
+            UserDefaults.standard.set(Date(), forKey: key)
+            for kind in ["BILUXXPShortcut", "BILUXQuestShortcut", "BILUXGuardianV77", "BILUXTreatmentV77"] {
+                WidgetCenter.shared.reloadTimelines(ofKind: kind)
+            }
+        } catch { /* Unavailable cache is never a journal error. */ }
     }
 }

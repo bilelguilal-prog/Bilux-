@@ -318,3 +318,54 @@ enum ImportIssue: LocalizedError {
     case invalidFile
     var errorDescription: String? { "Ce fichier n'est pas une sauvegarde JSON Bilux reconnue." }
 }
+// MARK: - V7.7 Guardian — read-only inspection and explicit protected checkpoints.
+struct V77BackupSummary {
+    let sessions: Int
+    let meals: Int
+    let checkins: Int
+    let labs: Int
+    let level: Int
+    let xp: Int
+    var text: String { "\(sessions) séances · \(meals) repas · \(checkins) bilans · \(labs) analyses · niveau \(level) · \(xp) XP" }
+}
+
+@MainActor
+extension BiluxStore {
+    func v77RefreshCopies() { refreshCopies() }
+    var v77LastSaved: Date? {
+        guard recoveryReady, UIApplication.shared.isProtectedDataAvailable,
+              committedRaw != nil, let attributes = try? FileManager.default.attributesOfItem(atPath: url.path) else { return nil }
+        return attributes[.modificationDate] as? Date
+    }
+    func v77Preview(_ source: URL) throws -> V77BackupSummary {
+        guard UIApplication.shared.isProtectedDataAvailable else { throw CocoaError(.fileReadNoPermission) }
+        let scoped = source.startAccessingSecurityScopedResource()
+        defer { if scoped { source.stopAccessingSecurityScopedResource() } }
+        let raw = try Data(contentsOf: source)
+        let value = try JSONDecoder().decode(BiluxData.self, from: raw)
+        guard value.version == 4, !Self.isEmpty(value) else { throw CocoaError(.fileReadCorruptFile) }
+        return V77BackupSummary(sessions: value.workouts.count, meals: value.meals.count,
+            checkins: value.checkins.count, labs: value.labs.count,
+            level: BILUXV55Progression.heroLevel(value), xp: BILUXV55Progression.totalXP(value))
+    }
+    @discardableResult
+    func v77Checkpoint() throws -> URL {
+        guard recoveryReady, let raw = committedRaw, try readExisting() == raw,
+              let value = committedData, !Self.isEmpty(value) else { throw CocoaError(.fileReadNoPermission) }
+        let fm = FileManager.default
+        try fm.createDirectory(at: backupDirectory, withIntermediateDirectories: true)
+        let stamp = String(format: "%020.0f", Date().timeIntervalSince1970 * 1000)
+        let file = backupDirectory.appendingPathComponent("\(stamp)-\(UUID().uuidString).json")
+        try raw.write(to: file, options: [.atomic, .completeFileProtection])
+        guard try Data(contentsOf: file) == raw else { throw CocoaError(.fileWriteUnknown) }
+        refreshCopies()
+        return file
+    }
+    func v77BeginRecovery() throws {
+        // The existing recovery gate takes over. Never reset the journal or the in-memory data.
+        _ = try v77Checkpoint()
+        UserDefaults.standard.set(false, forKey: approvalKey)
+        recoveryStatus = "Récupération ouverte à ta demande. Une copie protégée du journal vient d’être créée."
+        recoveryReady = false
+    }
+}

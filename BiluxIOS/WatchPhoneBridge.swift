@@ -53,6 +53,7 @@ final class WatchPhoneBridge: NSObject, ObservableObject, WCSessionDelegate {
         if merged != treatmentRecords {
             V76TreatmentRecord.save(merged, "bilux.v76.treatment.phone")
             treatmentRecords = merged
+            v77Log("Confirmation quotidienne fusionnée")
         }
         sendSnapshot()
         // A direct message is opportunistic; application context remains the durable latest state.
@@ -70,6 +71,7 @@ final class WatchPhoneBridge: NSObject, ObservableObject, WCSessionDelegate {
         enriched.forgeDays = Array(days.prefix(20))
         enriched.forgeDayCount = days.count
         enriched.treatmentRecords = Array(treatmentRecords.prefix(366))
+        enriched.v77TreatmentSummaryAt = Date()
         return try? JSONEncoder().encode(enriched)
     }
     private func receiveV76Event(_ message: [String: Any]) -> Bool {
@@ -161,7 +163,10 @@ final class WatchPhoneBridge: NSObject, ObservableObject, WCSessionDelegate {
               WCSession.default.isWatchAppInstalled,
               let payload = encodedSnapshot() else { return }
         // Dernier état uniquement : ne crée pas de file d'attente médicale.
-        try? WCSession.default.updateApplicationContext(["biluxSnapshot": payload])
+        do {
+            try WCSession.default.updateApplicationContext(["biluxSnapshot": payload])
+            v77Log("Résumé RPG mis en file")
+        } catch { v77Log("Échec de mise en file du résumé") }
     }
 
     // Reçu iPhone durable avant traitement. Le journal reste en protection complète.
@@ -206,11 +211,13 @@ final class WatchPhoneBridge: NSObject, ObservableObject, WCSessionDelegate {
                 if journal.safeSnapshotData?.workouts.contains(where: { $0.id == id && !$0.notes.hasPrefix("Récupération V7.6.1 depuis Apple Santé") }) == true {
                     if WCSession.isSupported(), WCSession.default.activationState == .activated {
                         WCSession.default.transferUserInfo(["type": "v761WorkoutAck", "id": key])
+                        v77Log("Séance stockée · acquittement mis en file")
                     }
                 } else { remaining.append(message) }
             }
             try write(remaining)
         } catch {
+            v77Log("Transfert séance en attente · erreur de stockage")
             // Le fichier précédemment écrit et/ou la file Watch restent disponibles pour un nouvel essai.
         }
     }
@@ -312,5 +319,18 @@ final class WatchPhoneBridge: NSObject, ObservableObject, WCSessionDelegate {
                 replyHandler(["biluxSnapshot": data])
             } else { replyHandler([:]) }
         }
+    }
+}
+// V7.7 : journal technique borné. Aucune donnée médicale, aucun UUID de séance, aucun contenu de message.
+@MainActor
+private extension WatchPhoneBridge {
+    func v77Log(_ event: String) {
+        let key = "bilux.v77.syncDiagnostics"
+        let stamp = Date().formatted(date: .abbreviated, time: .shortened)
+        let entry = stamp + " · " + event
+        var rows = UserDefaults.standard.stringArray(forKey: key) ?? []
+        guard rows.first != entry else { return }
+        rows.insert(entry, at: 0)
+        UserDefaults.standard.set(Array(rows.prefix(40)), forKey: key)
     }
 }
