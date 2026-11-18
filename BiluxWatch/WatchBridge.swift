@@ -52,6 +52,13 @@ final class WatchBridge: NSObject, ObservableObject, WCSessionDelegate {
         V76TreatmentRecord.save(pending, "bilux.v76.treatment.pending")
         treatmentRecords = records; pendingTreatment = pending
     }
+    nonisolated func session(_ session: WCSession, didReceiveUserInfo userInfo: [String: Any]) {
+        guard userInfo["type"] as? String == "v761WorkoutAck", let key = userInfo["id"] as? String else { return }
+        Task { @MainActor in
+            let pending = UserDefaults.standard.array(forKey: self.pendingKey) as? [[String: Any]] ?? []
+            UserDefaults.standard.set(pending.filter { $0["id"] as? String != key }, forKey: self.pendingKey)
+        }
+    }
     nonisolated func session(_ session: WCSession, didReceiveMessage message: [String: Any]) {
         if let data = message["biluxSnapshot"] as? Data { Task { @MainActor in self.load(data) } }
     }
@@ -143,8 +150,13 @@ final class WatchBridge: NSObject, ObservableObject, WCSessionDelegate {
     private func flushWorkouts() {
         guard WCSession.isSupported(), WCSession.default.activationState == .activated else { return }
         let pending = UserDefaults.standard.array(forKey: pendingKey) as? [[String: Any]] ?? []
-        for event in pending { WCSession.default.transferUserInfo(event) }
-        UserDefaults.standard.removeObject(forKey: pendingKey)
+        let session = WCSession.default
+        for event in pending {
+            guard let key = event["id"] as? String,
+                  !session.outstandingUserInfoTransfers.contains(where: { $0.userInfo["id"] as? String == key }) else { continue }
+            session.transferUserInfo(event)
+        }
+        // V7.6.1 : garder la copie Watch jusqu'à la confirmation de l'écriture iPhone.
     }
 
     private func load(_ data: Data) {

@@ -1,32 +1,192 @@
 import Foundation
 import Combine
+import UIKit
 
 @MainActor
 final class BiluxStore: ObservableObject {
     @Published var data: BiluxData = BiluxData()
     @Published var feedback: String?
 
+    // V7.6.1 : l'absence de journal n'est jamais une autorisation d'écraser un fichier.
+    @Published private(set) var recoveryReady = false
+    @Published private(set) var recoveryStatus = "Journal en attente de lecture."
+    @Published private(set) var recoveryReadable = false
+    @Published private(set) var recoveryBackups: [URL] = []
     private let url: URL
+    private let backupDirectory: URL
+    private var committedRaw: Data?
+    private var committedData: BiluxData?
+    private var inspected = false
+    private let approvalKey = "bilux.v761.storage.approved"
+
     init() {
-        let fm = FileManager.default
-        let directory = (try? fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)) ?? fm.temporaryDirectory
+        let directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         url = directory.appendingPathComponent("bilux-v4.json")
-        if let file = try? Data(contentsOf: url), let recovered = try? JSONDecoder().decode(BiluxData.self, from: file) {
-            data = recovered
-        }
-        // V5.5: la premiere migration fige les XP deja gagnes et les formes acquises.
-        if data.longAscensionAnchor == nil {
-            data.longAscensionAnchor = BILUXV55Progression.makeAnchor(data)
-            save()
+        backupDirectory = directory.appendingPathComponent("BiluxRecoveryHistory", isDirectory: true)
+        reloadRecovery()
+    }
+
+    private func readExisting() throws -> Data? {
+        // Ne pas utiliser fileExists : un refus de lecture ne doit pas devenir une absence.
+        guard UIApplication.shared.isProtectedDataAvailable else { throw CocoaError(.fileReadNoPermission) }
+        do { return try Data(contentsOf: url) }
+        catch let error as NSError {
+            if error.domain == NSCocoaErrorDomain && error.code == NSFileReadNoSuchFileError { return nil }
+            throw error
         }
     }
-    func save() {
+
+    private func refreshCopies() {
+        recoveryBackups = ((try? FileManager.default.contentsOfDirectory(at: backupDirectory,
+            includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? [])
+            .filter { $0.pathExtension == "json" }.sorted { $0.lastPathComponent > $1.lastPathComponent }
+    }
+
+    func reloadRecovery() {
+        guard !recoveryReady else { return }
+        guard UIApplication.shared.isProtectedDataAvailable else {
+            recoveryStatus = "Déverrouille l’iPhone pour lire le journal protégé."
+            return
+        }
         do {
-            let encoded = try JSONEncoder().encode(data)
-            try encoded.write(to: url, options: [.atomic, .completeFileProtection])
-        } catch { feedback = "Impossible d'enregistrer le journal : \(error.localizedDescription)" }
+            let raw = try readExisting()
+            committedRaw = raw
+            committedData = nil
+            inspected = true
+            recoveryReadable = false
+            if let raw {
+                do {
+                    let loaded = try JSONDecoder().decode(BiluxData.self, from: raw)
+                    guard loaded.version == 4 else { throw CocoaError(.fileReadCorruptFile) }
+                    committedData = loaded
+                    data = loaded
+                    recoveryReadable = true
+                    recoveryStatus = "Journal actuel : \(loaded.workouts.count) séances, \(loaded.meals.count) repas, \(loaded.checkins.count) bilans."
+                    if UserDefaults.standard.bool(forKey: approvalKey) && loaded.longAscensionAnchor != nil && !Self.isEmpty(loaded) {
+                        recoveryReady = true
+                    } else { UserDefaults.standard.set(false, forKey: approvalKey) }
+                } catch {
+                    UserDefaults.standard.set(false, forKey: approvalKey)
+                    recoveryStatus = "Journal illisible. Il est conservé intact ; restaure une copie JSON."
+                }
+            } else {
+                UserDefaults.standard.set(false, forKey: approvalKey)
+                recoveryStatus = "Aucun journal principal trouvé. Restaure une sauvegarde avant de reprendre."
+            }
+            refreshCopies()
+        } catch {
+            inspected = false
+            recoveryReadable = false
+            recoveryStatus = "Lecture bloquée : \(error.localizedDescription). Aucune écriture autorisée."
+        }
     }
+
+    private static func isEmpty(_ value: BiluxData) -> Bool {
+        value.workouts.isEmpty && value.meals.isEmpty && value.checkins.isEmpty && value.labs.isEmpty
+    }
+
+    // Un instantané valable pour WCSession provient uniquement du dernier état écrit.
+    var safeSnapshotData: BiluxData? { recoveryReady ? committedData : nil }
+
+    // Conserve chaque ancienne version lisible (ou les octets bruts d'un fichier illisible).
+    // Si cette sauvegarde échoue, aucune écriture du journal principal n'est tentée.
+    private func persist(_ candidate: BiluxData) throws {
+        guard inspected, UIApplication.shared.isProtectedDataAvailable else { throw CocoaError(.fileWriteNoPermission) }
+        let previous = try readExisting()
+        guard previous == committedRaw else { throw CocoaError(.fileWriteUnknown) }
+        let encoded = try JSONEncoder().encode(candidate)
+        _ = try JSONDecoder().decode(BiluxData.self, from: encoded)
+        let fm = FileManager.default
+        try fm.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try fm.createDirectory(at: backupDirectory, withIntermediateDirectories: true)
+        if let previous, previous != encoded {
+            let stamp = String(format: "%020.0f", Date().timeIntervalSince1970 * 1000)
+            let name = "\(stamp)-\(UUID().uuidString).json"
+            try previous.write(to: backupDirectory.appendingPathComponent(name), options: [.atomic, .completeFileProtection])
+        }
+        if previous != encoded { try encoded.write(to: url, options: [.atomic, .completeFileProtection]) }
+        committedRaw = encoded
+        committedData = candidate
+        data = candidate
+        recoveryReadable = true
+        refreshCopies()
+    }
+
+    @discardableResult
+    func save() -> Bool {
+        guard recoveryReady else {
+            data = committedData ?? BiluxData()
+            feedback = "Journal en récupération : écriture refusée."
+            return false
+        }
+        do { try persist(data); return true }
+        catch {
+            data = committedData ?? BiluxData()
+            feedback = "Écriture annulée, dernière version conservée : \(error.localizedDescription)"
+            return false
+        }
+    }
+
+    // Le JSON choisi est la base explicite de récupération. Les éventuels enregistrements
+    // survivants sont fusionnés par UUID. Ni la date d'ancrage ni les XP ne sont inventés.
+    func recoveryRestore(_ source: URL) {
+        guard !recoveryReady else { return }
+        let scoped = source.startAccessingSecurityScopedResource()
+        defer { if scoped { source.stopAccessingSecurityScopedResource() } }
+        do {
+            let raw = try Data(contentsOf: source)
+            var candidate = try JSONDecoder().decode(BiluxData.self, from: raw)
+            guard candidate.version == 4, !Self.isEmpty(candidate) else { throw CocoaError(.fileReadCorruptFile) }
+            if let current = committedData {
+                candidate.workouts = Self.merged(candidate.workouts, current.workouts)
+                candidate.meals = Self.merged(candidate.meals, current.meals)
+                candidate.checkins = Self.merged(candidate.checkins, current.checkins)
+                candidate.labs = Self.merged(candidate.labs, current.labs)
+                candidate.exerciseLibrary = Array(Set((candidate.exerciseLibrary ?? []) + (current.exerciseLibrary ?? []))).sorted()
+                if candidate.caloriesGoal == nil { candidate.caloriesGoal = current.caloriesGoal }
+            }
+            if candidate.longAscensionAnchor == nil { candidate.longAscensionAnchor = BILUXV55Progression.makeAnchor(candidate) }
+            try persist(candidate)
+            UserDefaults.standard.set(false, forKey: approvalKey)
+            recoveryStatus = "Sauvegarde restaurée : \(candidate.workouts.count) séances, \(candidate.meals.count) repas, \(candidate.checkins.count) bilans. Niveau \(BILUXV55Progression.heroLevel(candidate))."
+        } catch { recoveryStatus = "Restauration refusée : \(error.localizedDescription). Le journal précédent est conservé." }
+    }
+
+    private static func merged<T: Identifiable>(_ base: [T], _ additional: [T]) -> [T] {
+        var ids = Set<T.ID>()
+        return (base + additional).filter { ids.insert($0.id).inserted }
+    }
+
+    func recoveryAddHealth(_ entry: WorkoutSession) {
+        guard !recoveryReady, var candidate = committedData else { return }
+        guard !candidate.workouts.contains(where: { $0.id == entry.id }) else {
+            recoveryStatus = "Cette séance est déjà dans BILUX."
+            return
+        }
+        candidate.workouts.insert(entry, at: 0)
+        do {
+            try persist(candidate)
+            recoveryStatus = "Séance Santé récupérée. Niveau \(BILUXV55Progression.heroLevel(candidate))."
+        } catch { recoveryStatus = "Séance non importée : \(error.localizedDescription)" }
+    }
+
+    func finishRecovery(allowNew: Bool = false) {
+        guard !recoveryReady, inspected else { return }
+        // Un journal corrompu n'est jamais effacé pour en créer un neuf.
+        guard var candidate = committedData ?? (allowNew && committedRaw == nil ? BiluxData() : nil) else { return }
+        guard allowNew || !Self.isEmpty(candidate) else { return }
+        if candidate.longAscensionAnchor == nil { candidate.longAscensionAnchor = BILUXV55Progression.makeAnchor(candidate) }
+        do {
+            try persist(candidate)
+            UserDefaults.standard.set(true, forKey: approvalKey)
+            recoveryReady = true
+        } catch { recoveryStatus = "Reprise refusée : \(error.localizedDescription)" }
+    }
+
+    var recoveryCanCreateNew: Bool { inspected && (committedRaw == nil || committedData.map(Self.isEmpty) == true) }
+
     func add(_ session: WorkoutSession) {
+        guard recoveryReady, !data.workouts.contains(where: { $0.id == session.id }) else { return }
         data.workouts.insert(session, at: 0)
         for exercise in session.exercises { registerExerciseName(exercise.name, saveImmediately: false) }
         save()
@@ -116,7 +276,11 @@ final class BiluxStore: ObservableObject {
             guard let object = try JSONSerialization.jsonObject(with: raw) as? [String: Any] else {
                 throw ImportIssue.invalidFile
             }
-            let result = try V3Import.parse(object)
+            guard recoveryReady else { throw CocoaError(.fileWriteNoPermission) }
+            let result: BiluxData
+            if object["version"] as? Int == 4 {
+                result = try JSONDecoder().decode(BiluxData.self, from: raw)
+            } else { result = try V3Import.parse(object) }
             let emptyBeforeImport = data.workouts.isEmpty && data.meals.isEmpty && data.checkins.isEmpty && data.labs.isEmpty
             let currentWorkouts = Set(data.workouts.map(\.id))
             let currentMeals = Set(data.meals.map(\.id))
@@ -135,13 +299,14 @@ final class BiluxStore: ObservableObject {
                 // Restaurer aussi les titres, auras et emblèmes depuis un export V5.9.
                 data.legacyLoadout = result.legacyLoadout
             }
-            save()
+            guard save() else { return }
             feedback = "Import terminé : \(result.workouts.count) séances, \(result.meals.count) repas, \(result.checkins.count) bilans et \(result.labs.count) résultats trouvés."
         } catch { feedback = "Import impossible : \(error.localizedDescription)" }
     }
     func exportJSON() -> URL? {
         do {
-            let file = FileManager.default.temporaryDirectory.appendingPathComponent("bilux-v4-sauvegarde.json")
+            guard recoveryReady else { throw CocoaError(.fileReadNoPermission) }
+            let file = FileManager.default.temporaryDirectory.appendingPathComponent("bilux-v4-sauvegarde-\(UUID().uuidString).json")
             let payload = try JSONEncoder().encode(data)
             try payload.write(to: file, options: [.atomic, .completeFileProtection])
             return file

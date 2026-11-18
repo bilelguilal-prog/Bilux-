@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import WatchConnectivity
+import UIKit
 
 /// Synchronise des résumés vers la montre sans transférer les données médicales sensibles.
 /// Les séances saisies sur la montre sont journalisées localement sur l'iPhone une seule fois.
@@ -11,6 +12,7 @@ final class WatchPhoneBridge: NSObject, ObservableObject, WCSessionDelegate {
     private var journal: BiluxStore?
     private var subscriptions = Set<AnyCancellable>()
     private var snapshot = WatchSnapshot.empty
+    private var recoverySnapshotValid = false
     private var activated = false
     private var awaitingWorkouts: [[String: Any]] = []
 
@@ -60,8 +62,9 @@ final class WatchPhoneBridge: NSObject, ObservableObject, WCSessionDelegate {
         }
     }
     private func encodedSnapshot() -> Data? {
+        guard recoverySnapshotValid, journal?.safeSnapshotData != nil else { return nil }
         var enriched = snapshot
-        enriched.updatedAt = Date()
+        // Ne jamais réhorodater un résumé vide ou obsolète comme s'il était neuf.
         // Limit plan snapshots to a modest payload; the full plan library remains on iPhone.
         let days = V76AvailablePlanDays()
         enriched.forgeDays = Array(days.prefix(20))
@@ -96,11 +99,17 @@ final class WatchPhoneBridge: NSObject, ObservableObject, WCSessionDelegate {
             WCSession.default.delegate = self
             WCSession.default.activate()
         }
-        for pending in awaitingWorkouts { receiveWorkout(pending) }
-        awaitingWorkouts.removeAll()
+        journal.$recoveryReady.receive(on: DispatchQueue.main).sink { [weak self, weak health] ready in
+            guard let self, ready, let health, let data = self.journal?.safeSnapshotData else { return }
+            self.updateSnapshot(data: data, health: health.today)
+            self.retryRecoveryWorkouts()
+        }.store(in: &subscriptions)
+        retryRecoveryWorkouts()
     }
 
-    private func updateSnapshot(data: BiluxData, health: DailyHealthSummary) {
+    private func updateSnapshot(data _: BiluxData, health: DailyHealthSummary) {
+        guard let data = journal?.safeSnapshotData else { recoverySnapshotValid = false; return }
+        recoverySnapshotValid = true
         let xp = BILUXV55Progression.totalXP(data)
         let level = BILUXV55Progression.heroLevel(data)
         let rank = BILUXV55Progression.stageNames[BILUXV55Progression.stageIndex(data)]
@@ -155,8 +164,59 @@ final class WatchPhoneBridge: NSObject, ObservableObject, WCSessionDelegate {
         try? WCSession.default.updateApplicationContext(["biluxSnapshot": payload])
     }
 
+    // Reçu iPhone durable avant traitement. Le journal reste en protection complète.
+    // L'inbox utilise la protection après premier déverrouillage pour les transferts de fond.
+    private var recoveryInboxURL: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("BiluxWatchRecoveryInbox.plist")
+    }
     private func receiveWorkout(_ message: [String: Any]) {
-        guard let journal else { awaitingWorkouts.append(message); return }
+        guard message["type"] as? String == "workoutCompleted",
+              let key = message["id"] as? String, UUID(uuidString: key) != nil else { return }
+        if !awaitingWorkouts.contains(where: { $0["id"] as? String == key }) { awaitingWorkouts.append(message) }
+        retryRecoveryWorkouts()
+    }
+    func retryRecoveryWorkouts() {
+        let file = recoveryInboxURL
+        do {
+            var pending: [[String: Any]] = []
+            do {
+                let raw = try Data(contentsOf: file)
+                guard let rows = try PropertyListSerialization.propertyList(from: raw, options: [], format: nil) as? [[String: Any]] else { return }
+                pending = rows
+            } catch let e as NSError {
+                guard e.domain == NSCocoaErrorDomain && e.code == NSFileReadNoSuchFileError else { return }
+            }
+            for message in awaitingWorkouts where !pending.contains(where: { ($0["id"] as? String) == (message["id"] as? String) }) {
+                pending.append(message)
+            }
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            func write(_ rows: [[String: Any]]) throws {
+                let raw = try PropertyListSerialization.data(fromPropertyList: rows, format: .binary, options: 0)
+                try raw.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            }
+            try write(pending)
+            awaitingWorkouts.removeAll()
+            guard let journal, journal.recoveryReady, UIApplication.shared.isProtectedDataAvailable else { return }
+            var remaining: [[String: Any]] = []
+            for message in pending {
+                guard let key = message["id"] as? String, let id = UUID(uuidString: key) else { continue }
+                receiveWorkoutNow(message)
+                // Après sauvegarde effective uniquement : aucune perte silencieuse par acquittement prématuré.
+                if journal.safeSnapshotData?.workouts.contains(where: { $0.id == id && !$0.notes.hasPrefix("Récupération V7.6.1 depuis Apple Santé") }) == true {
+                    if WCSession.isSupported(), WCSession.default.activationState == .activated {
+                        WCSession.default.transferUserInfo(["type": "v761WorkoutAck", "id": key])
+                    }
+                } else { remaining.append(message) }
+            }
+            try write(remaining)
+        } catch {
+            // Le fichier précédemment écrit et/ou la file Watch restent disponibles pour un nouvel essai.
+        }
+    }
+
+    private func receiveWorkoutNow(_ message: [String: Any]) {
+        guard let journal, journal.recoveryReady else { return }
         guard (message["type"] as? String) == "workoutCompleted",
               let idString = message["id"] as? String,
               let id = UUID(uuidString: idString),
@@ -167,7 +227,10 @@ final class WatchPhoneBridge: NSObject, ObservableObject, WCSessionDelegate {
             guard raw.count <= 100_000, let parsed = try? JSONDecoder().decode(V76ForgePayload.self, from: raw), parsed.valid else { return nil }
             return parsed
         }
-        if let old = journal.data.workouts.first(where: { $0.id == id }) {
+        let recoveredEntry = journal.data.workouts.first(where: { $0.id == id })
+        // Ne jamais réécrire une séance déjà journalisée, sauf mise à niveau d'une
+        // entrée minimale issue de la recherche Santé de cette version.
+        if let old = recoveredEntry, !old.notes.hasPrefix("Récupération V7.6.1 depuis Apple Santé") {
             if let forge { V76LinkWatchWorkout(forge, workout: old) }
             return
         }
@@ -212,13 +275,20 @@ final class WatchPhoneBridge: NSObject, ObservableObject, WCSessionDelegate {
                                                   activeKcal: calorie, zoneSeconds: zones,
                                                   referenceMaxBPM: ref, sampleCount: count)
         }
-        journal.add(entry)
-        if let forge, isLive { V76LinkWatchWorkout(forge, workout: entry) }
+        if let old = recoveredEntry {
+            if !old.exercises.isEmpty { entry.exercises = old.exercises }
+            if let rpe = old.rpe { entry.rpe = rpe }
+            journal.updateWorkout(entry)
+        } else { journal.add(entry) }
+        if let forge, isLive, journal.safeSnapshotData?.workouts.contains(where: { $0.id == entry.id }) == true {
+            V76LinkWatchWorkout(forge, workout: entry)
+        }
     }
 
     nonisolated func session(_ session: WCSession, activationDidCompleteWith state: WCSessionActivationState, error: Error?) {
         Task { @MainActor in
             activated = state == .activated
+            retryRecoveryWorkouts()
             sendSnapshot()
         }
     }
