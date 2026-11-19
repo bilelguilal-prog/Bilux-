@@ -54,8 +54,10 @@ workflows:
           - BILUX-Distribution
         provisioning_profiles:
           - BILUX-AppStore
-          - bilux_watch_v77_r2
-          - bilux_widget_v77_r2
+          - profile: bilux_watch_v77_r2
+            environment_variable: BILUX_WATCH_PROFILE_PATH
+          - profile: bilux_widget_v77_r2
+            environment_variable: BILUX_WIDGET_PROFILE_PATH
     scripts:
       # Le projet contient maintenant DEUX identifiants à signer :
       # com.bilux.nuclearascension et com.bilux.nuclearascension.watchkitapp.
@@ -64,7 +66,7 @@ workflows:
       - name: Appliquer les profils Apple (iPhone et Watch)
         script: xcode-project use-profiles --project BiluxIOS.xcodeproj --archive-method=app-store --code-signing-setup-verbose-logging
       - name: Associer le profil Apple du widget
-        script: python3 scripts/verify_v77_groups.py && python3 scripts/assign_widget_signing.py
+        script: python3 scripts/sign_v77_selected.py
       - name: Construire la version TestFlight
         script: |
           xcode-project build-ipa \
