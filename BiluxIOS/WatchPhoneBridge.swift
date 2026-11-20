@@ -257,6 +257,7 @@ final class WatchPhoneBridge: NSObject, ObservableObject, WCSessionDelegate {
                 receiveWorkoutNow(message)
                 // Après sauvegarde effective uniquement : aucune perte silencieuse par acquittement prématuré.
                 if journal.safeSnapshotData?.workouts.contains(where: { $0.id == id && !$0.notes.hasPrefix("Récupération V7.6.1 depuis Apple Santé") }) == true {
+                    UserDefaults.standard.set(id.uuidString, forKey: "bilux.v79.lastReceivedWorkout")
                     if WCSession.isSupported(), WCSession.default.activationState == .activated {
                         WCSession.default.transferUserInfo(["type": "v761WorkoutAck", "id": key])
                         v77Log("Séance stockée · acquittement mis en file")

@@ -979,7 +979,7 @@ struct MainTabs: View {
 
     var body: some View {
         TabView(selection: $selected) {
-            HomeScreen(selectedTab: $selected)
+            V79Today(selectedTab: $selected)
                 .tabItem { Label("Accueil", systemImage: "house.fill") }.tag(0)
             SportScreen()
                 .tabItem { Label("Sport", systemImage: "dumbbell.fill") }.tag(1)
@@ -4022,6 +4022,9 @@ private struct V70NuclearForge: View {
     @EnvironmentObject private var journal: BiluxStore
     @Environment(\.dismiss) private var dismiss
     var launch: V73ForgeLaunch? = nil
+    var v79Name: String? = nil
+    var v79Previous: WorkoutSet? = nil
+    @State private var v79Opened = false
 
     @State private var sessionDate = Date()
     @State private var duration = "60"
@@ -4060,24 +4063,10 @@ private struct V70NuclearForge: View {
                     Text("Une séance, plusieurs exercices, autant de séries que nécessaire.")
                         .font(.caption).foregroundStyle(Nuclear.muted)
                 }
-                NuclearCard {
-                    DatePicker("Date", selection: $sessionDate, in: ...Date(), displayedComponents: .date)
-                    HStack {
-                        Text("Durée (min)").font(.subheadline)
-                        Spacer()
-                        TextField("60", text: $duration).keyboardType(.numberPad)
-                            .multilineTextAlignment(.trailing).frame(width: 64)
-                    }
-                    HStack {
-                        Text("Effort perçu").font(.subheadline)
-                        Spacer()
-                        Stepper("\(rpe)/10", value: $rpe, in: 1...10)
-                            .labelsHidden()
-                        Text("\(rpe)/10").foregroundStyle(Nuclear.gold)
-                            .font(.subheadline.monospacedDigit())
-                    }
-                    TextField("Notes de séance (facultatif)", text: $notes, axis: .vertical)
-                        .lineLimit(2...4)
+                if v79Name == nil {
+                    v79SessionSettings
+                } else {
+                    DisclosureGroup("Durée : \(duration) min · Détails") { v79SessionSettings }
                 }
 
                 if !prepared.isEmpty {
@@ -4211,6 +4200,14 @@ private struct V70NuclearForge: View {
         .navigationBarTitleDisplayMode(.inline)
         .modifier(PageBackground())
         .onAppear(perform: prefillFromProgram)
+        .onAppear {
+            guard !v79Opened, launch == nil, let name = v79Name else { return }
+            v79Opened = true
+            exerciseName = name
+            if let set = v79Previous {
+                draftSets = [V70DraftSet(reps: String(set.reps), weight: String(set.weight))]
+            }
+        }
         .alert("Vérifie la séance", isPresented: Binding(
             get: { errorText != nil },
             set: { if !$0 { errorText = nil } }
@@ -4232,6 +4229,28 @@ private struct V70NuclearForge: View {
         }
         duration = String(launch.day.durationMinutes)
         notes = "Programme : \(launch.planName) · \(launch.day.title)"
+    }
+
+    private var v79SessionSettings: some View {
+        NuclearCard {
+                    DatePicker("Date", selection: $sessionDate, in: ...Date(), displayedComponents: .date)
+                    HStack {
+                        Text("Durée (min)").font(.subheadline)
+                        Spacer()
+                        TextField("60", text: $duration).keyboardType(.numberPad)
+                            .multilineTextAlignment(.trailing).frame(width: 64)
+                    }
+                    HStack {
+                        Text("Effort perçu").font(.subheadline)
+                        Spacer()
+                        Stepper("\(rpe)/10", value: $rpe, in: 1...10)
+                            .labelsHidden()
+                        Text("\(rpe)/10").foregroundStyle(Nuclear.gold)
+                            .font(.subheadline.monospacedDigit())
+                    }
+                    TextField("Notes de séance (facultatif)", text: $notes, axis: .vertical)
+                        .lineLimit(2...4)
+                }
     }
 
     private func makeCurrentExercise() -> WorkoutExercise? {
@@ -6672,5 +6691,160 @@ private struct V76TreatmentHistory: View {
             Button("OK") { feedback = nil }
         } message: { Text(feedback ?? "") }
         .onChange(of: bridge.treatmentRecords) { _, _ in exportURL = nil }
+    }
+}
+
+
+// MARK: - BILUX V7.9
+private struct V79Today: View {
+    @EnvironmentObject private var journal: BiluxStore
+    @Binding var selectedTab: Int
+    @AppStorage("bilux.v79.lastReceivedWorkout") private var lastReceived = ""
+    @AppStorage("bilux.v78.debrief") private var priorDebrief = Data()
+    @State private var sheet: FormSheet?
+    private enum FormSheet: String, Identifiable {
+        case meal, checkin, headquarters
+        var id: Self { self }
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    Button { selectedTab = 4 } label: {
+                        HStack(spacing: 12) {
+                            Image("BiluxHero").resizable().scaledToFill()
+                                .frame(width: 56, height: 60).clipShape(RoundedRectangle(cornerRadius: 10))
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Niveau \(journal.heroLevel) · \(journal.rankName)").font(.headline)
+                                ProgressView(value: journal.xpFraction).tint(Nuclear.gold)
+                                Text("\(journal.totalXP) XP").font(.caption.monospacedDigit())
+                            }
+                            Image(systemName: "chevron.right").accessibilityHidden(true)
+                        }.padding(12).background(Nuclear.panel, in: RoundedRectangle(cornerRadius: 14))
+                    }.buttonStyle(.plain).accessibilityHint("Ouvre Ascension")
+                    NavigationLink { V79ExerciseChoice() } label: {
+                        Label("Séance libre", systemImage: "dumbbell.fill")
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }.buttonStyle(.borderedProminent).tint(Nuclear.gold).foregroundStyle(.black)
+                    VStack(spacing: 2) {
+                        action("Ajouter un repas", icon: "fork.knife", sheet: .meal)
+                        action("Faire mon bilan", icon: "heart.text.square", sheet: .checkin)
+                    }
+                    Text("Dernière séance").font(.headline)
+                    if let workout = journal.safeSnapshotData?.workouts.max(by: { $0.date < $1.date }) {
+                        NavigationLink { V79WorkoutDetail(workout: workout) } label: {
+                            NuclearCard {
+                                HStack {
+                                    Text(workout.activity).font(.headline)
+                                    Spacer()
+                                    Image(systemName: "chevron.right").font(.caption)
+                                }
+                                Text(workout.date.formatted(.dateTime.day().month(.wide).year()))
+                                Text("\(workout.durationMinutes) min · \(workout.exercises.reduce(0) { $0 + $1.sets.count }) séries")
+                                if workout.id.uuidString == lastReceived || (try? JSONDecoder().decode(V78Debrief.self, from: priorDebrief))?.id == workout.id {
+                                    Label("Reçue de la Watch", systemImage: "checkmark.circle.fill")
+                                        .font(.caption.bold()).foregroundStyle(Nuclear.gold)
+                                }
+                            }
+                        }.buttonStyle(.plain)
+                    } else {
+                        Text("Ta première séance enregistrée apparaîtra ici.").foregroundStyle(.secondary)
+                    }
+                    action("Ouvrir le QG", icon: "bolt.shield", sheet: .headquarters)
+                }.padding()
+            }
+            .modifier(PageBackground()).navigationTitle("Aujourd’hui")
+        }
+        .sheet(item: $sheet) { item in
+            switch item {
+            case .meal: NewMealScreen()
+            case .checkin: NewCheckinScreen()
+            case .headquarters: HomeScreen(selectedTab: $selectedTab)
+            }
+        }
+        .onChange(of: selectedTab) { value in if value != 0 { sheet = nil } }
+    }
+
+    private func action(_ title: String, icon: String, sheet destination: FormSheet) -> some View {
+        Button { sheet = destination } label: {
+            Label(title, systemImage: icon).frame(maxWidth: .infinity, alignment: .leading)
+                .frame(minHeight: 44)
+        }.buttonStyle(.bordered).tint(Nuclear.gold)
+    }
+}
+
+private struct V79ExerciseChoice: View {
+    @EnvironmentObject private var journal: BiluxStore
+    @State private var query = ""
+    private var history: [String: WorkoutExercise] {
+        var found: [String: WorkoutExercise] = [:]
+        for workout in journal.data.workouts.sorted(by: { $0.date > $1.date }) {
+            for exercise in workout.exercises.reversed() where !exercise.sets.isEmpty {
+                let key = V78Reactor.key(exercise.name)
+                if !key.isEmpty && found[key] == nil { found[key] = exercise }
+            }
+        }
+        return found
+    }
+    var body: some View {
+        let recent = history
+        let favorites = ["Développé couché", "Tractions", "Rowing", "Dips", "Presse à cuisses", "Curl"]
+        let terms = (recent.values.map(\.name).sorted() + favorites)
+        var seen = Set<String>()
+        let key = V78Reactor.key(query)
+        let names = terms.filter {
+            let name = V78Reactor.key($0)
+            return seen.insert(name).inserted && (key.isEmpty || name.contains(key))
+        }
+        return List {
+            if !key.isEmpty && !names.contains(where: { V78Reactor.key($0) == key }) {
+                row(query.trimmingCharacters(in: .whitespacesAndNewlines), previous: nil)
+            }
+            ForEach(names, id: \.self) { name in
+                row(name, previous: recent[V78Reactor.key(name)]?.sets.last)
+            }
+        }
+        .searchable(text: $query, prompt: "Chercher ou saisir un exercice")
+        .navigationTitle("Séance libre")
+    }
+    private func row(_ name: String, previous: WorkoutSet?) -> some View {
+        NavigationLink {
+            V70NuclearForge(v79Name: name, v79Previous: previous)
+        } label: {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(name)
+                if let set = previous {
+                    Text("Dernière série · \(set.weight.formatted()) kg × \(set.reps)")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+}
+
+private struct V79WorkoutDetail: View {
+    let workout: WorkoutSession
+    var body: some View {
+        List {
+            Section {
+                Text(workout.date.formatted(date: .long, time: .omitted))
+                Text("\(workout.durationMinutes) min")
+            }
+            if workout.exercises.isEmpty {
+                Text("Aucune série consignée pour cette séance.").foregroundStyle(.secondary)
+            }
+            ForEach(workout.exercises) { exercise in
+                Section(exercise.name) {
+                    ForEach(Array(exercise.sets.enumerated()), id: \.element.id) { index, set in
+                        HStack {
+                            Text("Série \(index + 1)")
+                            Spacer()
+                            Text("\(set.weight.formatted()) kg × \(set.reps)").monospacedDigit()
+                        }
+                    }
+                }
+            }
+        }.navigationTitle(workout.activity)
     }
 }
