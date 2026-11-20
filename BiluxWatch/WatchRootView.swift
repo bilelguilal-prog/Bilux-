@@ -846,6 +846,12 @@ private final class V61NuclearLive: NSObject, ObservableObject, HKWorkoutSession
 
 
     @Published private(set) var forgeDraft: V76ForgeDraft?
+    @Published private(set) var v78FinishedID: UUID?
+    @Published private(set) var v78Result: String?
+    func selectFreeExercise(_ name: String, history: [V76Target]) {
+        guard phase == .running else { return }
+        forgeDraft?.selectExercise(name, history: history)
+    }
     private var forgeRestTask: Task<Void, Never>?
     func setForgeWeight(_ value: Double) { if value.isFinite, (0...1000).contains(value), phase == .running { forgeDraft?.weight = value } }
     func setForgeReps(_ value: Double) { if value.isFinite, (1...100).contains(value), phase == .running { forgeDraft?.reps = value.rounded() } }
@@ -1018,6 +1024,10 @@ private final class V61NuclearLive: NSObject, ObservableObject, HKWorkoutSession
                         referenceMaxBPM: self.maxReferenceBPM,
                         sampleCount: self.heartSamples, forgePayload: self.forgeDraft?.payload
                     )
+                    if let draft = self.forgeDraft {
+                        self.v78FinishedID = workout.uuid
+                        self.v78Result = "\(draft.count) séries · \(draft.volume.formatted()) kg de volume"
+                    }
                     self.clearReferences()
                     self.phase = .saved
                     self.message = "Séance dans Apple Santé ✓ · Transfert BILUX lancé."
@@ -1124,6 +1134,7 @@ private final class V61NuclearLive: NSObject, ObservableObject, HKWorkoutSession
 private struct V61LiveWorkoutView: View {
     @EnvironmentObject private var bridge: WatchBridge
     @StateObject private var live = V61NuclearLive.shared
+    @State private var showV78Forge = false
     @State private var selectedMode: V61LiveMode = .strength
     @State private var confirmCancel = false
     @AppStorage("bilux.watch.live.maxReferenceBPM") private var maxReferenceBPM = 190
@@ -1137,6 +1148,11 @@ private struct V61LiveWorkoutView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 9) {
                 V54ReactorTitle(text: "NUCLEAR COMMAND · V6.2", symbol: "heart.fill")
+                if !live.inProgress || live.forgeDraft != nil {
+                    Button(live.forgeDraft == nil ? "Réacteur · séance libre ou programme" : "Saisir mes séries") {
+                        showV78Forge = true
+                    }.sheet(isPresented: $showV78Forge) { V76WatchForge().environmentObject(bridge) }
+                }
                 if !live.inProgress {
                     V54ReactorCard(accent: V54ReactorTheme.purple) {
                         Label("CAPTEURS EN DIRECT", systemImage: "waveform.path.ecg")
@@ -1789,7 +1805,7 @@ private struct V69WatchGuardiansPage: View {
 }
 // MARK: - V7.6 · Forge Live, un seul moteur HealthKit.
 private struct V76ForgeDraft {
-    let day: V76PlanDay
+    var day: V76PlanDay
     var actual: [V76ActualExercise] = []
     var index = 0
     var weight: Double
@@ -1805,13 +1821,39 @@ private struct V76ForgeDraft {
     var count: Int { actual.reduce(0) { $0 + $1.sets.count } }
     var currentCount: Int { current.flatMap { target in actual.first { $0.id == target.id }?.sets.count } ?? 0 }
     var payload: V76ForgePayload { V76ForgePayload(planID: day.planID, dayID: day.id, exercises: actual) }
+    var isFree: Bool { day.planID == V78Reactor.freeID }
+    var volume: Double {
+        actual.flatMap(\.sets).reduce(0) { $0 + $1.weight * Double($1.reps) }
+    }
+    mutating func selectExercise(_ name: String, history: [V76Target]) {
+        let title = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isFree, !title.isEmpty, title.count <= 80 else { return }
+        let key = V78Reactor.key(title)
+        let previous = history.first { V78Reactor.key($0.name) == key }
+        if let i = day.exercises.firstIndex(where: { V78Reactor.key($0.name) == key }) {
+            index = i
+        } else {
+            // Only confirmed exercises count towards the transfer limit.
+            guard actual.count < 12 else { return }
+            var choices = day.exercises.filter { option in actual.contains { $0.id == option.id } }
+            choices.append(V76Target(id: UUID(), name: title, sets: 12,
+                                     reps: previous?.reps ?? 8, weight: previous?.weight ?? 0))
+            day = V76PlanDay(planID: day.planID, id: day.id, planName: day.planName,
+                             title: day.title, exercises: choices)
+            index = choices.count - 1
+        }
+        guard let option = current else { return }
+        let last = actual.first { $0.id == option.id }?.sets.last
+        weight = last?.weight ?? previous?.weight ?? option.weight
+        reps = Double(last?.reps ?? previous?.reps ?? option.reps)
+    }
     mutating func confirm() {
         guard let target = current, currentCount < target.sets, weight.isFinite, reps.isFinite,
             (0...1000).contains(weight), (1...100).contains(reps) else { return }
         let set = V76ActualSet(id: UUID(), reps: Int(reps.rounded()), weight: weight)
         if let i = actual.firstIndex(where: { $0.id == target.id }) { actual[i].sets.append(set) }
         else { actual.append(V76ActualExercise(id: target.id, name: target.name, sets: [set])) }
-        if currentCount >= target.sets {
+        if !isFree && currentCount >= target.sets {
             index += 1
             if let next = current { weight = next.weight; reps = Double(next.reps) }
         }
@@ -1865,6 +1907,50 @@ private struct V76WatchForge: View {
     @AppStorage("bilux.watch.live.zoneHaptics") private var zoneHaptics = false
     @AppStorage("bilux.v76.rest.seconds") private var restSeconds = 90
     @State private var cancelConfirm = false
+    @State private var exerciseList = false
+    @State private var customName = ""
+    private var history: [V76Target] { bridge.snapshot.v78History ?? [] }
+    private let staples = ["Développé couché", "Développé incliné", "Tirage vertical", "Rowing",
+                           "Tractions", "Dips", "Squat", "Presse à cuisses", "Curl", "Élévations latérales"]
+    private func choose(_ name: String) {
+        live.selectFreeExercise(name, history: history)
+        exerciseList = false
+        customName = ""
+    }
+    private func selector(_ draft: V76ForgeDraft) -> some View {
+        let names = draft.day.exercises.map(\.name) + draft.actual.map(\.name) + history.map(\.name) + staples
+        var keys = Set<String>()
+        let options = names.filter { keys.insert(V78Reactor.key($0)).inserted }
+        let available = Set(draft.actual.map { V78Reactor.key($0.name) })
+        return VStack(alignment: .leading) {
+            Button { exerciseList.toggle() } label: {
+                Label(draft.current?.name ?? "Choisir un exercice",
+                      systemImage: exerciseList ? "chevron.up" : "chevron.down")
+            }.disabled(live.phase != .running)
+            if exerciseList {
+                ForEach(options, id: \.self) { name in
+                    Button(name) { choose(name) }
+                        .disabled(draft.actual.count >= 12 && !available.contains(V78Reactor.key(name)))
+                }
+                if draft.actual.count < 12 {
+                    TextField("Autre exercice", text: $customName)
+                    Button("Utiliser ce nom") { choose(customName) }
+                        .disabled(V78Reactor.key(customName).isEmpty || customName.count > 80)
+                }
+            }
+            if let name = draft.current?.name,
+               let last = history.first(where: { V78Reactor.key($0.name) == V78Reactor.key(name) }) {
+                Text("Dernière séance · \(last.weight.formatted()) kg × \(last.reps)").font(.caption2)
+            }
+            Text("\(draft.count) séries · \(draft.volume.formatted()) kg de volume").font(.caption2)
+        }
+    }
+    private func startFree(_ targets: [V76Target]) {
+        exerciseList = targets.isEmpty
+        customName = ""
+        Task { await live.start(mode: .strength, bridge: bridge, referenceMaxBPM: reference,
+                                enableHaptics: zoneHaptics, forgeDay: V78Reactor.day(targets)) }
+    }
     @State private var finishConfirm = false
     private enum CrownField: Hashable { case weight, reps }
     @FocusState private var crownField: CrownField?
@@ -1878,9 +1964,21 @@ private struct V76WatchForge: View {
                     Text("Une séance Nuclear Live est déjà en cours. Termine-la dans LIVE avant de lancer un programme.").font(.caption2)
                 } else {
                     if let message = live.message { Text(message).font(.caption2).foregroundStyle(V54ReactorTheme.secondary) }
+                    Button("Séance libre") { startFree([]) }
+                        .buttonStyle(.borderedProminent).tint(V54ReactorTheme.gold)
+                    if let model = bridge.snapshot.v78Model, !model.isEmpty {
+                        Button("Reprendre la dernière séance") { startFree(model) }
+                    }
+                    if let result = live.v78Result {
+                        Text(result).font(.caption2)
+                        if let report = bridge.snapshot.v78Debrief, report.id == live.v78FinishedID {
+                            Text("XP : \(report.xp) · Records de charge : " +
+                                 (report.records.isEmpty ? "aucun" : report.records.joined(separator: ", "))).font(.caption2)
+                        }
+                    }
                     Button { bridge.refresh() } label: { Label("ACTUALISER LES PROGRAMMES", systemImage: "arrow.clockwise").font(.caption2.bold()) }
                     if (bridge.snapshot.forgeDays ?? []).isEmpty {
-                        Text("Crée un programme dans Eternal Forge sur l'iPhone, puis synchronise la montre.").font(.caption2)
+                        Text("Tes programmes iPhone apparaîtront ici après synchronisation.").font(.caption2)
                     }
                     if let total = bridge.snapshot.forgeDayCount, total > (bridge.snapshot.forgeDays ?? []).count {
                         Text("20 premières journées actives affichées sur la montre. Les autres restent disponibles sur iPhone.").font(.caption2)
@@ -1926,11 +2024,12 @@ private struct V76WatchForge: View {
             if let zone = live.cardiacZone { Text("ZONE Z\(zone)").font(.caption2).foregroundStyle(V54ReactorTheme.purple) }
             if let message = live.message { Text(message).font(.caption2) }
         }
+        if draft.isFree { selector(draft) }
         if let target = draft.current {
             V54ReactorCard(accent: V54ReactorTheme.purple) {
                 Text("EXERCICE \(draft.index + 1)/\(draft.day.exercises.count)").font(.caption2.bold())
                 Text(target.name).font(.headline)
-                Text("SÉRIE \(draft.currentCount + 1)/\(target.sets)").font(.caption2.bold()).foregroundStyle(V54ReactorTheme.gold)
+                Text(draft.isFree ? "\(draft.currentCount) séries validées" : "SÉRIE \(draft.currentCount + 1)/\(target.sets)").font(.caption2.bold()).foregroundStyle(V54ReactorTheme.gold)
                 Text("\(draft.weight.formatted(.number.precision(.fractionLength(0...1)))) kg")
                     .font(.title3.bold()).monospacedDigit()
                     .focusable(true)
@@ -1951,8 +2050,10 @@ private struct V76WatchForge: View {
                 }
                 Button { live.confirmForgeSet(restSeconds: restSeconds) } label: { Label("VALIDER LA SÉRIE", systemImage: "checkmark.circle.fill").font(.caption.bold()) }
                     .buttonStyle(.borderedProminent).tint(V54ReactorTheme.gold)
-                    .disabled(live.phase != .running || draft.restUntil != nil)
+                    .disabled(live.phase != .running || draft.restUntil != nil || draft.currentCount >= target.sets)
             }
+        } else if draft.isFree {
+            Text("Choisis ton premier exercice pour saisir une série.").font(.caption2)
         } else {
             Text("PROGRAMME TERMINÉ · \(draft.count) séries validées").font(.headline).foregroundStyle(V54ReactorTheme.gold)
         }

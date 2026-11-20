@@ -52,6 +52,9 @@ struct WatchSnapshot: Codable {
     // Optionnel pour relire sans migration les snapshots des anciennes versions.
     var masteryPaths: [WatchMasteryPath]? = nil
     var forgeDays: [V76PlanDay]? = nil
+    var v78History: [V76Target]? = nil
+    var v78Model: [V76Target]? = nil
+    var v78Debrief: V78Debrief? = nil
     var forgeDayCount: Int? = nil
     var treatmentRecords: [V76TreatmentRecord]? = nil
     // Horodatage indépendant : ne jamais avancer la date du résumé RPG.
@@ -142,5 +145,23 @@ struct V76ForgePayload: Codable {
             !exercise.sets.isEmpty && exercise.sets.count <= 12 && Set(exercise.sets.map(\.id)).count == exercise.sets.count &&
             exercise.sets.allSatisfy { (1...100).contains($0.reps) && $0.weight.isFinite && (0...1000).contains($0.weight) }
         }
+    }
+}
+
+struct V78Debrief: Codable {
+    let id: UUID
+    let xp: Int
+    let records: [String]
+}
+
+enum V78Reactor {
+    static let freeID = UUID(uuidString: "81F0896A-14F6-4B76-B937-9AC125780078")!
+    static func key(_ name: String) -> String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines)
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "fr_FR"))
+    }
+    static func day(_ targets: [V76Target] = []) -> V76PlanDay {
+        V76PlanDay(planID: freeID, id: UUID(), planName: "Libre",
+                   title: "Séance libre", exercises: targets)
     }
 }

@@ -62,6 +62,44 @@ final class WatchPhoneBridge: NSObject, ObservableObject, WCSessionDelegate {
             WCSession.default.sendMessage(["biluxSnapshot": data], replyHandler: nil, errorHandler: { _ in })
         }
     }
+    private func v78History(_ data: BiluxData) -> (recent: [V76Target], model: [V76Target]) {
+        var seen = Set<String>()
+        var history: [V76Target] = []
+        var model: [V76Target] = []
+        for workout in data.workouts.sorted(by: { $0.date > $1.date }) {
+            var targets: [V76Target] = []
+            var sessionNames = Set<String>()
+            for exercise in workout.exercises.reversed() {
+                let name = exercise.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                let key = V78Reactor.key(name)
+                guard !key.isEmpty, name.count <= 80,
+                      let set = exercise.sets.last(where: { (1...100).contains($0.reps) && $0.weight.isFinite && (0...1000).contains($0.weight) }),
+                      sessionNames.insert(key).inserted else { continue }
+                let target = V76Target(id: set.id, name: name, sets: 12, reps: set.reps, weight: set.weight)
+                targets.append(target)
+                if history.count < 32, seen.insert(key).inserted { history.append(target) }
+            }
+            if model.isEmpty { model = Array(targets.reversed().prefix(12)) }
+            if history.count == 32 { break }
+        }
+        return (history, model)
+    }
+    private func v78Records(_ workout: WorkoutSession, previous: [WorkoutSession]) -> [String] {
+        var best: [String: Double] = [:]
+        for past in previous where past.id != workout.id && past.date <= workout.date {
+            for exercise in past.exercises {
+                let key = V78Reactor.key(exercise.name)
+                for set in exercise.sets where set.weight.isFinite && set.reps > 0 {
+                    best[key] = max(best[key] ?? 0, set.weight)
+                }
+            }
+        }
+        return workout.exercises.compactMap { exercise in
+            guard let old = best[V78Reactor.key(exercise.name)],
+                  exercise.sets.contains(where: { $0.weight > old && $0.reps > 0 }) else { return nil }
+            return exercise.name
+        }
+    }
     private func encodedSnapshot() -> Data? {
         guard recoverySnapshotValid, journal?.safeSnapshotData != nil else { return nil }
         var enriched = snapshot
@@ -70,6 +108,16 @@ final class WatchPhoneBridge: NSObject, ObservableObject, WCSessionDelegate {
         let days = V76AvailablePlanDays()
         enriched.forgeDays = Array(days.prefix(20))
         enriched.forgeDayCount = days.count
+        if let data = journal?.safeSnapshotData {
+            let history = v78History(data)
+            enriched.v78History = history.recent
+            enriched.v78Model = history.model
+            if let raw = UserDefaults.standard.data(forKey: "bilux.v78.debrief"),
+               let report = try? JSONDecoder().decode(V78Debrief.self, from: raw),
+               data.workouts.contains(where: { $0.id == report.id }) {
+                enriched.v78Debrief = report
+            }
+        }
         enriched.treatmentRecords = Array(treatmentRecords.prefix(366))
         enriched.v77TreatmentSummaryAt = Date()
         return try? JSONEncoder().encode(enriched)
@@ -282,12 +330,20 @@ final class WatchPhoneBridge: NSObject, ObservableObject, WCSessionDelegate {
                                                   activeKcal: calorie, zoneSeconds: zones,
                                                   referenceMaxBPM: ref, sampleCount: count)
         }
+        let xpBefore = journal.totalXP
+        let previousWorkouts = journal.data.workouts
         if let old = recoveredEntry {
             if !old.exercises.isEmpty { entry.exercises = old.exercises }
             if let rpe = old.rpe { entry.rpe = rpe }
             journal.updateWorkout(entry)
         } else { journal.add(entry) }
         if let forge, isLive, journal.safeSnapshotData?.workouts.contains(where: { $0.id == entry.id }) == true {
+            let report = V78Debrief(id: entry.id, xp: journal.totalXP - xpBefore,
+                                   records: v78Records(entry, previous: previousWorkouts))
+            if let raw = try? JSONEncoder().encode(report) {
+                UserDefaults.standard.set(raw, forKey: "bilux.v78.debrief")
+            }
+            sendSnapshot()
             V76LinkWatchWorkout(forge, workout: entry)
         }
     }
